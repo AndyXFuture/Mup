@@ -1,0 +1,24 @@
+音珏 - Mup  使用方法
+====================================
+
+【打包成单个 exe】（一行指令，在项目根目录 F:\Code\TraePro\Mup 下运行）：
+
+pyinstaller -F -w -n Mup -i resources/app_icon.ico --add-data "resources;resources" main.py
+
+说明：
+- -F            打包为单个 exe 文件
+- -w            不显示控制台窗口
+- -n Mup        exe 名称（生成 dist\Mup.exe）
+- -i ...        程序图标
+- --add-data    把 resources 目录打进 exe（运行时自动从临时目录读取）
+
+打包完成后，双击 dist\Mup.exe 即可运行；首次启动填写「音桥」连接参数。
+
+【运行源码】
+1. 安装依赖：pip install -r requirements.txt
+2. 运行：python main.py
+
+【使用要点】
+- 关闭窗口默认最小化到系统托盘（右下角图标），右键托盘图标可选择「退出」
+- 支持系统媒体键与自定义快捷键（Ctrl+Alt+P 播放/暂停 等）
+- 关闭后再次启动会自动恢复上次歌单与音量
