@@ -1,166 +1,71 @@
----
-name: Extruded Light
-colors:
-  surface: '#f7f9ff'
-  surface-dim: '#d8dae0'
-  surface-bright: '#f7f9ff'
-  surface-container-lowest: '#ffffff'
-  surface-container-low: '#f2f3f9'
-  surface-container: '#eceef4'
-  surface-container-high: '#e6e8ee'
-  surface-container-highest: '#e0e2e8'
-  on-surface: '#181c20'
-  on-surface-variant: '#464554'
-  inverse-surface: '#2d3135'
-  inverse-on-surface: '#eff1f7'
-  outline: '#767586'
-  outline-variant: '#c7c4d7'
-  surface-tint: '#494bd6'
-  primary: '#4648d4'
-  on-primary: '#ffffff'
-  primary-container: '#6063ee'
-  on-primary-container: '#fffbff'
-  inverse-primary: '#c0c1ff'
-  secondary: '#5b5f64'
-  on-secondary: '#ffffff'
-  secondary-container: '#dde0e5'
-  on-secondary-container: '#606368'
-  tertiary: '#8039b0'
-  on-tertiary: '#ffffff'
-  tertiary-container: '#9b54cb'
-  on-tertiary-container: '#fffbff'
-  error: '#ba1a1a'
-  on-error: '#ffffff'
-  error-container: '#ffdad6'
-  on-error-container: '#93000a'
-  primary-fixed: '#e1e0ff'
-  primary-fixed-dim: '#c0c1ff'
-  on-primary-fixed: '#07006c'
-  on-primary-fixed-variant: '#2f2ebe'
-  secondary-fixed: '#e0e2e8'
-  secondary-fixed-dim: '#c4c6cc'
-  on-secondary-fixed: '#181c20'
-  on-secondary-fixed-variant: '#44474c'
-  tertiary-fixed: '#f3daff'
-  tertiary-fixed-dim: '#e3b5ff'
-  on-tertiary-fixed: '#2f004c'
-  on-tertiary-fixed-variant: '#691f98'
-  background: '#f7f9ff'
-  on-background: '#181c20'
-  surface-variant: '#e0e2e8'
-typography:
-  headline-xl:
-    fontFamily: Plus Jakarta Sans
-    fontSize: 40px
-    fontWeight: '600'
-    lineHeight: 48px
-    letterSpacing: -0.02em
-  headline-lg:
-    fontFamily: Plus Jakarta Sans
-    fontSize: 32px
-    fontWeight: '600'
-    lineHeight: 40px
-    letterSpacing: -0.01em
-  headline-lg-mobile:
-    fontFamily: Plus Jakarta Sans
-    fontSize: 28px
-    fontWeight: '600'
-    lineHeight: 36px
-  headline-md:
-    fontFamily: Plus Jakarta Sans
-    fontSize: 24px
-    fontWeight: '600'
-    lineHeight: 32px
-  body-lg:
-    fontFamily: Plus Jakarta Sans
-    fontSize: 18px
-    fontWeight: '500'
-    lineHeight: 28px
-  body-md:
-    fontFamily: Plus Jakarta Sans
-    fontSize: 16px
-    fontWeight: '500'
-    lineHeight: 24px
-  label-md:
-    fontFamily: Plus Jakarta Sans
-    fontSize: 14px
-    fontWeight: '600'
-    lineHeight: 20px
-    letterSpacing: 0.01em
-  label-sm:
-    fontFamily: Plus Jakarta Sans
-    fontSize: 12px
-    fontWeight: '600'
-    lineHeight: 16px
-    letterSpacing: 0.02em
-rounded:
-  sm: 0.25rem
-  DEFAULT: 0.5rem
-  md: 0.75rem
-  lg: 1rem
-  xl: 1.5rem
-  full: 9999px
-spacing:
-  base: 8px
-  xs: 4px
-  sm: 12px
-  md: 24px
-  lg: 48px
-  xl: 80px
-  gutter: 24px
-  margin-mobile: 16px
-  margin-desktop: 64px
----
+# 音珏 - Mup 视觉规范
 
-## Brand & Style
-The brand personality is tactile, serene, and sophisticated. It focuses on a "Soft UI" or Neomorphic aesthetic where the interface feels like a physical, molded surface rather than a flat screen. The target audience values premium digital craftsmanship and a sense of calm during interaction.
+本规范以已确认的 HTML 视觉稿为基准。实现目标是视觉等价，不直接套用 Material
+默认组件外观。
 
-The design style is defined by **Neomorphism**. UI elements are not "placed on" the background; they are part of the background, either extruded outward or pressed inward. This creates a monochromatic, sculptural depth that relies on the precise play of light and shadow rather than high-contrast color blocks. The emotional response should be one of "digital haptics"—a desire to touch and interact with the soft, pillowy surfaces.
+## 视觉原则
 
-## Colors
-The color palette is strictly anchored to the base "Clay" hue (#E8EAF0). For the Neomorphic effect to function, almost all UI surfaces must match this hex code exactly, as the depth is created by shadows and highlights of the same base color.
+1. **收敛，而不是厚重**：面板靠半透明渐变、1px 渐变亮边与低透明度柔影分层。
+2. **冷紫环境光**：背景使用深灰黑或冷白渐变，并在左上叠加淡紫径向光。
+3. **控制层级**：内容优先，面板不要比内容更抢眼。
+4. **轻量动效**：悬浮、按压、页面切换与歌词滚动使用短时缓动，不做弹跳。
+5. **数字排版稳定**：时间使用等宽数字；长标题与歌词单行省略。
 
-- **Primary (Indigo):** Reserved for high-intent interactive elements, active icons, and focus indicators. It should be used sparingly to maintain the soft aesthetic.
-- **Tertiary (Violet):** Used for subtle highlights, success states, or secondary accentuation.
-- **On Surface:** A deep charcoal-gray for high-readability text.
-- **On Surface Variant:** A muted slate-gray for secondary information and labels.
+## 核心色板
 
-## Typography
-The typography system utilizes **Plus Jakarta Sans** to complement the rounded, soft nature of the UI. To maintain the "Soft UI" look, avoid Bold (700+) weights, which can feel too aggressive against the delicate shadows. Instead, use SemiBold (600) for hierarchy in headings and Medium (500) for body text.
+| 令牌 | 深色 | 浅色 |
+| --- | --- | --- |
+| 背景顶 | `#1B1C24` | `#FBFBFF` |
+| 背景底 | `#0F1015` | `#EEF0F7` |
+| 主色 | `#6A66F5` | `#4F4BD6` |
+| 主色亮 | `#8F8BFF` | `#7A76FF` |
+| 正文 | `#EEF0F6` | `#1A1B22` |
+| 次要文字 | `#9AA0AD` | `#5F6470` |
+| 爱心 | `#EF6F8F` | `#D94A6A` |
 
-The type scale is generous. Headings use slightly tighter letter spacing to feel more cohesive as "objects" on the screen. Body text remains open and legible. All text should maintain high contrast against the clay background, as the background itself lacks structural borders.
+面板使用竖向渐变，外层 1px 对角渐变描边：
 
-## Layout & Spacing
-The layout follows a **fluid grid** model with significant breathing room. Because the UI relies on soft shadows rather than hard lines, white space (or "clay space") is the primary tool for grouping elements. 
+`rimLight -> rimSoft -> rimDark`
 
-- **Desktop:** 12-column grid with 24px gutters and wide 64px margins.
-- **Mobile:** 4-column grid with 16px margins. 
-- **Rhythm:** All spacing must be a multiple of 8px. Use larger internal padding (min 24px) for cards to ensure shadows have room to "breath" without clipping or overlapping adjacent content.
+阴影只用于分离层，不使用高对比硬描边，也不绘制窗口四边的额外暗带。历史经验表明，
+窗口焦点暗带叠在侧边栏和播放栏阴影上，会被误认为拟态边框变粗。
 
-## Elevation & Depth
-Depth is the core of this design system. It is achieved through a dual-shadow technique that simulates a light source coming from the top-left (135 degrees).
+## 尺寸与布局
 
-- **Raised Surfaces (Extruded):** Use a light shadow on the top-left (White, 60% opacity) and a dark shadow on the bottom-right (Black, 8% opacity). This makes elements appear to pop out of the page.
-- **Pressed Surfaces (Inset):** Use an inner shadow. The top-left gets the dark shadow (Black, 6% opacity) and the bottom-right gets the light shadow (White, 50% opacity). This makes elements appear carved into the surface.
-- **Focus States:** When an element is focused, use a subtle Indigo glow or a transition from Raised to Pressed state.
+- 标题栏：44px。
+- 页面左右外边距：16px。
+- 侧边栏：200px，与内容区间隔 16px。
+- 歌单封面：96px，圆角 18px，底部紫色柔光。
+- 歌曲行：64px，封面 48px，圆角 12px。
+- 播放栏：104px，圆角 18px，左右内边距 20px。
+- 沉浸页播放栏：左右内边距 24px。
+- 播放键：44px 圆形，相对整个窗口水平绝对居中。
+- 上一曲/下一曲：30px，与播放键间隔 12px。
+- 播放进度条：380px 区域，时间各 42px，轨道 2px 且总长度固定。
 
-## Shapes
-Shapes must be consistently rounded to maintain the organic, tactile feel. Sharp corners are strictly prohibited as they break the illusion of a molded surface.
+## 曲库页
 
-- **Standard Elements:** 0.5rem (8px) radius for small tags or chips.
-- **Interactive Elements:** 1rem (16px) radius for buttons and inputs.
-- **Containers:** 1.5rem (24px) radius for cards and modal overlays.
-- **Pills:** Full rounding for toggles and status indicators.
+- 侧边栏搜索框必须单行，占位文字为「搜索歌曲、歌手」。
+- 侧边栏和内容面板底色贴近背景，通过半透明与亮边分层。
+- 当前歌曲行使用淡紫底、左侧律动柱与紫色标题。
+- 迷你歌词水平居中于整个窗口，而不是只居中内容区。
+- 播放栏顶部中央有一道两侧透明渐隐的短紫色辉光线。
+- 进度填充与音量填充只改变已填充长度，不能改变轨道总长度。
 
-## Components
-Consistent application of the "Extruded Light" philosophy across components:
+## 沉浸页
 
-- **Cards:** Use the **Raised** shadow token. Padding should be 24px. Content inside should be flat or use further inset elements.
-- **Buttons:** 
-  - **Default:** Raised style with Medium weight text.
-  - **Active/Pressed:** Transition to **Inset** shadow style.
-  - **Primary:** Use Indigo for the text and icon color, never as a solid background fill (which would break the neomorphic effect).
-- **Input Fields:** Use the **Inset** shadow style by default to look "carved" into the surface. On focus, the inset shadow can deepen or a subtle Indigo stroke can be added.
-- **Toggles & Sliders:** The track must be **Inset**, while the thumb/handle must be **Raised**. This creates a physical metaphor of a switch sitting inside a groove.
-- **Lists:** Items should be separated by space rather than dividers. Active list items can take on a subtle Inset shape to indicate selection.
-- **Chips:** Small raised surfaces with label-sm typography.
+- 顶栏：返回、正在播放、爱心、更多。
+- 页面左右各占 50%，1px 分隔线严格位于窗口中心。
+- 左侧封面尺寸自适应，圆角 28px，并带柔和紫色底光。
+- 右侧歌词左对齐；当前行 18px 加粗，其他行按距离渐隐。
+- 底部保留歌名和歌手，不重复封面。
+- 左侧文字到面板的间距应与上下内边距接近。
+
+## 交互
+
+- 进度圆点默认透明，鼠标悬浮或拖动时才显示。
+- 点击歌手/专辑只命中文字本身，分别进入歌手页和专辑页。
+- 双击标题栏空白区域最大化/恢复；最大化时拖动标题栏恢复并移动。
+- 关闭窗口隐藏到托盘；只有托盘「退出」才停止播放并结束进程。
+- 暂停时图标立即切换，声音在 2 秒内淡出；恢复播放时从当前音量续接淡入。
+- 点击音量图标可在静音与上次音量之间切换。

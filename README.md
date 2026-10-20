@@ -1,99 +1,141 @@
 # 音珏 - Mup
 
-通过 **Subsonic 协议**连接飞牛音乐的轻量 Windows 音乐播放器，界面参考 QQ 音乐布局，采用 DESIGN.md 的新拟态（Neumorphism）设计语言。
+通过 **Subsonic / OpenSubsonic** 连接飞牛音乐的轻量 Windows 音乐播放器。
+当前版本使用 Flutter 原生桌面界面，通过 **音桥（Yinqiao）** 将飞牛音乐服务
+转换为 Subsonic 协议后接入，不直接调用飞牛官方 API。
 
-> 音珏 - Mup 本身不连接飞牛官方 API，而是通过 **音桥（Yinqiao）**（[fn-music-bridge](https://github.com/qianlipp/fn-music-bridge)）将飞牛音乐转接为 Subsonic 协议后接入。
+当前版本：**v0.4.0 Flutter**
+
+本项目是公开的开源与提示词记录项目。旧版 PySide6/Qt 界面保留在
+[`v0.3.13`](https://github.com/AndyXFuture/Mup/tree/v0.3.13) 标签中；
+`main` 分支展示当前 Flutter 实现。
+
+## 界面预览
+
+| 曲库深色 | 曲库浅色 |
+| --- | --- |
+| ![曲库深色](docs/library-dark.png) | ![曲库浅色](docs/library-light.png) |
+
+| 沉浸播放深色 | 沉浸播放浅色 |
+| --- | --- |
+| ![播放页深色](docs/player-dark.png) | ![播放页浅色](docs/player-light.png) |
+
+更多截图：
+
+- [设置页深色](docs/settings-dark.png)
+- [设置页浅色](docs/settings-light.png)
+- [歌手页](docs/artists-dark.png)
+- [连接服务器页](docs/connect-window.png)
+
+公开截图使用固定的示例数据，不包含真实服务器、账号或听歌记录。
 
 ## 特性
 
-- 🎨 **新拟态 UI**：Extruded Light 浅色风格 + 靛蓝主色，默认跟随系统深浅色（可在设置切换）
-- 🗂 **三界面**：连接服务器页 → 歌单页 → 沉浸页
-- 🎧 **基础播放**：播放/暂停、上/下一曲（实心三角）、进度拖动、音量（静音记忆 + 调整时显示百分比）、收藏；播放栏爱心前置、歌名跑马灯
-- 📥 **完整歌单**：音桥 Subsonic 仅返回前 50 首时，自动改用 **Jellyfin 协议**补全完整歌单（「我喜欢」2023 首）；两段式加载（先 50 首秒开，后台补全全量）；侧边栏显示真实歌曲数
-- 🖼 **自定义封面**：音桥不同步飞牛自定义歌单封面 → 点编辑(铅笔)按钮可选本地图片作为歌单封面（服务器封面/自定义封面可切换），持久化保存
-- ♻️ **重启恢复**：默认打开上次歌单并显示上次歌曲（不自动播放、恢复进度），音量/播放模式/**窗口尺寸**一并恢复
-- 🔀 **播放模式**：随机 / 顺序 / 单曲循环 / 列表循环（单按钮弹出菜单切换）
-- 📚 **完整音乐库导航**：我的歌单（与导航唯一选中互斥）/ 专辑网格 / 歌手（左列按歌曲数排序 + 右侧歌曲）/ 收藏 / 最近播放
-- 🔍 **搜索**：侧边栏顶部搜索框，`Ctrl+F` 聚焦，300ms 防抖自动搜索（歌曲/专辑/歌手一次命中），`Esc` 或清空即回到搜索前的页面
-- 📊 **可排序列表**：点击列头循环切换排序；歌曲行悬浮播放指示 + 当前播放四柱白色动画；**歌手名/专辑名可点击跳转**
-- 🖼 **沉浸页**：左右 50% 分栏、封面随窗口自适应、点播放栏封面动画放大过渡（其它内容渐变出现）；大封面圆形/方形切换；随播放滚动高亮歌词
-- 🎤 **迷你歌词**：播放栏上方显示当前句，背景底部半透明→顶部全透明渐变
-- ⌨️ **全局快捷键**：系统媒体键（低级键盘钩子）+ 自定义组合键（Ctrl+Alt+P 等）
-- ⚡ **低占用**：纯 QWidget、歌曲列表虚拟化渲染、封面异步加载 + LRU 缓存、歌单加载缓存，万首歌曲流畅
-- 🪟 **无边框窗口**：自定义标题栏（含设置入口，沉浸页也常显）+ 原生边缘缩放 + **双击标题栏最大化/还原**
+- 🎨 **Flutter 原生 UI**：冷调渐变背景、半透明面板、收敛亮边与柔和辉光。
+- 🌗 **深浅主题**：支持跟随系统、浅色和深色模式。
+- 🗂 **完整曲库导航**：歌单、收藏、最近播放、歌手、专辑和搜索。
+- 📥 **完整歌单补全**：音桥返回的 Subsonic 歌单不足时，使用 Jellyfin 协议分页补全。
+- 🎧 **播放控制**：播放/暂停、上一曲/下一曲、进度拖动、音量调节和静音恢复。
+- 🔀 **四种播放模式**：列表循环、随机播放、单曲循环和顺序播放。
+- 🎤 **同步歌词**：时间轴歌词、沉浸页滚动高亮和曲库页居中迷你歌词。
+- 🖼 **沉浸播放页**：左右 50% 分栏、大封面柔光、歌词左对齐。
+- 📊 **歌手排序**：从完整音频库统计曲目，包含合作曲，按歌曲数降序排列。
+- 🪟 **原生窗口体验**：位置/尺寸恢复、双击标题栏最大化、最大化时拖动还原。
+- 📌 **托盘常驻**：关闭窗口后继续播放，托盘菜单可恢复或退出。
+- ⌨️ **全局媒体键**：窗口隐藏后仍支持播放/暂停、上一曲和下一曲。
+- 🚀 **开机自启**：使用当前用户注册表启动项，无需管理员权限。
+- 🔒 **单实例**：重复启动会唤回已有窗口，不会产生多个播放器进程。
 
-## 截图
+## 下载
 
-![连接服务器页](docs/screenshot_connect.png)
-![歌单页](docs/screenshot_library.png)
-![沉浸页](docs/screenshot_player.png)
-![深色模式](docs/screenshot_library_dark.png)
+从 GitHub Releases 下载 v0.4.0：
 
-## 快速开始
+`Mup-Flutter-v0.4.0-windows-x64.zip`
 
-```bash
-# 安装依赖
-pip install -r requirements.txt
+完整解压后运行 `Mup-v0.4.0.exe`。
 
-# 运行
-python main.py
-```
+> Flutter Windows 使用目录式发布包，不能只复制 exe。`data/`、
+> `flutter_windows.dll` 和同目录插件 DLL 都是运行必需文件。
 
-首次启动填写「音桥」的连接参数（服务器 IP、端口、用户名、密码），连接成功后参数会自动保存，下次启动自动重连。
+## 连接音桥
 
-### 音桥配置（可选）
+1. 在飞牛 NAS 上安装
+   [音桥 fn-music-bridge](https://github.com/qianlipp/fn-music-bridge/releases)。
+2. 开启 Subsonic / OpenSubsonic 协议并记录端口。
+3. 首次启动填写服务器地址、端口（默认 `14040`）、用户名和密码。
+4. 连接成功后配置会自动保存，下次启动直接进入曲库。
 
-1. 在飞牛 NAS 上安装 [音桥](https://github.com/qianlipp/fn-music-bridge/releases)
-2. 开启 Subsonic 协议并记录端口
-3. 在本程序连接页填写音桥地址与飞牛音乐账号即可
+## 快捷键
 
-## 全局快捷键
-
-| 功能 | 默认键 | 系统媒体键 |
-|---|---|---|
+| 功能 | 默认快捷键 | 系统媒体键 |
+| --- | --- | --- |
 | 播放 / 暂停 | `Ctrl+Alt+P` | 播放/暂停键 |
 | 下一曲 | `Ctrl+Alt+→` | 下一曲键 |
 | 上一曲 | `Ctrl+Alt+←` | 上一曲键 |
-| 音量 + | `Ctrl+Alt+↑` | 音量+键 |
-| 音量 - | `Ctrl+Alt+↓` | 音量-键 |
+| 音量 + | 系统音量键 | 音量+键 |
+| 音量 - | 系统音量键 | 音量-键 |
 
-自定义快捷键在 `config.json` 的 `hotkeys` 字段修改。
+## 开发
 
-### 界面快捷键
+环境要求：
 
-| 功能 | 按键 |
-|---|---|
-| 聚焦搜索框（沉浸页也可用） | `Ctrl+F` |
-| 退出搜索 / 清空搜索框 | `Esc` |
+- Windows 10/11 x64
+- Flutter `3.47.7` stable
+- Dart `3.13.5`
+- Visual Studio 2022，包含“使用 C++ 的桌面开发”工作负载
+
+```powershell
+git clone https://github.com/AndyXFuture/Mup.git
+cd Mup
+flutter pub get
+flutter analyze
+flutter test
+flutter run -d windows
+```
+
+构建 Release：
+
+```powershell
+.\tool\build-release.ps1 -Version 0.4.0 -BuildNumber 1
+```
+
+产物位于 `release/`。完整构建说明见
+[`使用方法.txt`](使用方法.txt)。
 
 ## 技术栈
 
-Python 3.10 · PySide6 (Qt Widgets) · requests · QMediaPlayer · Win32 API
+Flutter · Dart · Just Audio · Windows SMTC 媒体键 · Win32 · Subsonic ·
+OpenSubsonic · Jellyfin · Lucide Icons
 
 ## 项目结构
 
-```
-main.py                  入口
-app/
-  config.py              配置持久化
-  subsonic_client.py     Subsonic 客户端
-  cover_manager.py       封面异步加载与缓存
-  player.py              播放核心（队列 + 播放模式）
-  hotkeys.py             全局快捷键
-ui/
-  theme.py               DESIGN.md 主题
-  widgets.py             新拟态控件库
-  windows.py             无边框主窗口 / 过渡动画
-  pages/                 连接页 / 歌单页 / 沉浸页
+```text
+lib/
+  core/        配置、协议客户端、播放队列和 Windows 集成
+  ui/
+    components/ 玻璃面板、按钮、封面等基础控件
+    pages/      曲库、播放、设置、连接页
+    widgets/    侧边栏与播放栏
+windows/runner/ 窗口、单实例、托盘和全局媒体键
+tool/           构建与脱敏截图脚本
+docs/           验收截图与视觉参考
 ```
 
-详见 [项目细节描述.md](项目细节描述.md)。
+## 隐私
+
+- `config.json`、日志、封面缓存、音频缓存和构建产物不会提交。
+- 服务器参数只保存在当前用户的本地配置目录。
+- 公开截图通过 `--demo` 模式生成，不读取真实账号或音乐库。
+
+详细实现见 [项目细节描述.md](项目细节描述.md)，版本历史见
+[更新日志.md](更新日志.md)，开发提示词见 [提示词记录.txt](提示词记录.txt)。
 
 ## 致谢
 
-- [音桥 fn-music-bridge](https://github.com/qianlipp/fn-music-bridge) —— 把飞牛音乐转接为 Subsonic 等协议
-- [Subsonic API](http://www.subsonic.org/pages/api.jsp) —— 开放音乐流媒体协议
+- [音桥 fn-music-bridge](https://github.com/qianlipp/fn-music-bridge)
+- [Subsonic API](http://www.subsonic.org/pages/api.jsp)
+- [Lucide Icons](https://lucide.dev/)
 
-## 许可证
+## License
 
 MIT License

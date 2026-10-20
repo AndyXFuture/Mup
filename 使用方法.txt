@@ -1,24 +1,88 @@
-音珏 - Mup  使用方法
-====================================
+音珏 - Mup Flutter 版 0.4.0 构建说明
 
-【打包成单个 exe】（一行指令，在项目根目录 F:\Code\TraePro\Mup 下运行）：
+一、环境要求
 
-pyinstaller -F -w -n Mup -i resources/app_icon.ico --add-data "resources;resources" main.py
+- Windows 10/11 x64
+- Flutter 3.47.7 stable
+- Dart 3.13.5
+- Visual Studio 2022，需安装“使用 C++ 的桌面开发”工作负载
+- Git
 
-说明：
-- -F            打包为单个 exe 文件
-- -w            不显示控制台窗口
-- -n Mup        exe 名称（生成 dist\Mup.exe）
-- -i ...        程序图标
-- --add-data    把 resources 目录打进 exe（运行时自动从临时目录读取）
+二、进入项目
 
-打包完成后，双击 dist\Mup.exe 即可运行；首次启动填写「音桥」连接参数。
+PowerShell:
 
-【运行源码】
-1. 安装依赖：pip install -r requirements.txt
-2. 运行：python main.py
+    cd Mup
 
-【使用要点】
-- 关闭窗口默认最小化到系统托盘（右下角图标），右键托盘图标可选择「退出」
-- 支持系统媒体键与自定义快捷键（Ctrl+Alt+P 播放/暂停 等）
-- 关闭后再次启动会自动恢复上次歌单与音量
+三、安装依赖
+
+    flutter pub get
+
+四、静态检查
+
+    flutter analyze
+
+五、运行测试
+
+    flutter test
+
+六、调试运行
+
+    flutter run -d windows
+
+用于生成脱敏 UI 截图的演示参数：
+
+    Mup.exe --demo --dark
+    Mup.exe --demo --light
+    Mup.exe --demo --player --dark
+    Mup.exe --demo --settings --light
+
+七、构建 Release
+
+直接使用项目脚本：
+
+    .\tool\build-release.ps1 -Version 0.4.0 -BuildNumber 1
+
+或手动构建：
+
+    flutter build windows --release
+
+八、构建产物
+
+未经过发布脚本处理时，产物位于：
+
+    build\windows\x64\runner\Release\
+
+发布脚本会生成：
+
+    release\Mup-Flutter-v0.4.0\
+    release\Mup-Flutter-v0.4.0-windows-x64.zip
+
+主程序：
+
+    release\Mup-Flutter-v0.4.0\Mup-v0.4.0.exe
+
+注意：Flutter Windows 使用目录式发布包，不能只复制 exe。
+必须同时分发同目录下的：
+
+- data\
+- flutter_windows.dll
+- file_selector_windows_plugin.dll
+- just_audio_windows_plugin.dll
+- screen_retriever_windows_plugin.dll
+- tray_manager_plugin.dll
+- window_manager_plugin.dll
+
+九、构建前检查
+
+1. 确认 config.json 没有被加入 Git。
+2. 确认 docs 截图使用 --demo 数据，不包含真实服务器、账号或听歌记录。
+3. 确认 flutter analyze 无问题。
+4. 确认 flutter test 全部通过。
+5. 确认最终 ZIP 内包含 exe、全部 DLL 和 data 文件夹。
+
+十、版本信息
+
+- 项目：音珏 - Mup
+- Flutter UI 重写版本：0.4.0
+- 构建号：1

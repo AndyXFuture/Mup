@@ -1,0 +1,673 @@
+<div id="mup-rim2">
+  <style>
+    #mup-rim2 {
+      font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", sans-serif;
+    }
+    #mup-rim2 * { box-sizing: border-box; }
+    #mup-rim2 .stage {
+      display: flex; justify-content: center; align-items: flex-start;
+      padding: 10px 0 14px;
+    }
+    #mup-rim2 .theme-dark {
+      --bg0:#0f1015; --bg1:#1b1c24;
+      --text:#eef0f6; --muted:#9aa0ad; --dim:#6f7480;
+      --surface: rgba(34,36,46,.42); --surface-2: rgba(20,21,28,.52);
+      --rim: rgba(255,255,255,.18); --rim-soft: rgba(255,255,255,.07);
+      --counter: rgba(0,0,0,.55); --shadow: rgba(0,0,0,.55);
+      --primary:#6a66f5; --primary-2:#8f8bff; --primary-soft:#2b2c55; --primary-text:#c9c8ff;
+      --danger:#ef6f8f; --track: rgba(255,255,255,.08); --sep: rgba(255,255,255,.045);
+      --ambient: rgba(96,84,241,.20);
+    }
+    #mup-rim2 .theme-light {
+      --bg0:#eef0f7; --bg1:#fbfbff;
+      --text:#1a1b22; --muted:#5f6470; --dim:#8a8f9c;
+      --surface: rgba(255,255,255,.52); --surface-2: rgba(248,249,253,.66);
+      --rim: rgba(255,255,255,.98); --rim-soft: rgba(255,255,255,.65);
+      --counter: rgba(26,27,34,.06); --shadow: rgba(68,64,100,.16);
+      --primary:#4f4bd6; --primary-2:#7a76ff; --primary-soft:#e7e6ff; --primary-text:#3f3cc0;
+      --danger:#d94a6a; --track: rgba(26,27,34,.08); --sep: rgba(26,27,34,.06);
+      --ambient: rgba(96,84,241,.14);
+    }
+    #mup-rim2 .app {
+      width: 980px; height: 622px; border-radius: 20px; overflow: hidden;
+      position: relative; display: flex; flex-direction: column;
+      color: var(--text);
+      background:
+        radial-gradient(62% 48% at 6% -12%, var(--ambient), transparent 70%),
+        linear-gradient(180deg, var(--bg1) 0%, var(--bg0) 100%);
+      box-shadow:
+        inset 1px 1px 0 var(--rim-soft),
+        inset -1px -1px 0 var(--counter),
+        0 44px 88px -28px var(--shadow);
+    }
+    #mup-rim2 .app > * { position: relative; }
+    #mup-rim2 .titlebar {
+      height: 44px; flex: none; display: flex; align-items: center; justify-content: space-between;
+      padding: 0 16px;
+    }
+    #mup-rim2 .brand { display:flex; align-items:center; gap:9px; font-size:13px; font-weight:600; letter-spacing:.3px; }
+    #mup-rim2 .logo {
+      width:20px; height:20px; border-radius:7px; display:grid; place-items:center; color:#fff;
+      background: linear-gradient(150deg,#7a76ff,#5651d8);
+      box-shadow: inset 1px 1px 0 rgba(255,255,255,.45), 0 4px 10px rgba(86,81,216,.45);
+    }
+    #mup-rim2 .logo svg { width:12px; height:12px; }
+    #mup-rim2 .winbtns { display:flex; gap:15px; color: var(--dim); }
+    #mup-rim2 .winbtns svg { width:14px; height:14px; }
+    #mup-rim2 .main { flex:1; min-height:0; display:flex; gap:16px; padding:0 16px 16px; }
+    #mup-rim2 .panel {
+      background: linear-gradient(180deg, var(--surface), var(--surface-2));
+      border: 1px solid var(--rim-soft);
+      box-shadow:
+        inset 1px 1px 0 var(--rim),
+        inset -1px -1px 0 var(--counter),
+        0 28px 56px -20px var(--shadow);
+      backdrop-filter: blur(18px);
+    }
+    #mup-rim2 .sidebar {
+      width:200px; flex:none; border-radius:18px; padding:12px 10px;
+      display:flex; flex-direction:column; gap:3px; min-height:0; position:relative;
+      background: linear-gradient(180deg, var(--surface), var(--surface-2));
+      border:1px solid var(--rim-soft);
+      box-shadow:
+        inset 1px 1px 0 var(--rim),
+        inset -1px -1px 0 var(--counter),
+        0 26px 52px -20px var(--shadow);
+      backdrop-filter: blur(18px);
+    }
+    #mup-rim2 .lib-progress {
+      position:absolute; left:16px; right:16px; bottom:13px;
+      display:flex; flex-direction:column; gap:6px;
+    }
+    #mup-rim2 .lib-progress .lpt {
+      height:3px; border-radius:2px; background: rgba(255,255,255,.10);
+      box-shadow: inset 0 1px 1px rgba(0,0,0,.25);
+    }
+    #mup-rim2 .theme-light .lib-progress .lpt {
+      background: rgba(26,27,34,.08); box-shadow: inset 0 1px 1px rgba(26,27,34,.06);
+    }
+    #mup-rim2 .lib-progress .lpt i {
+      display:block; height:100%; width:48%; border-radius:2px;
+      background: linear-gradient(90deg,#5c5be0,#a5a3ff);
+      box-shadow: 0 0 10px rgba(99,102,241,.65);
+    }
+    #mup-rim2 .lib-progress > span {
+      display:flex; justify-content:space-between; font-size:10px; color: var(--dim);
+    }
+    #mup-rim2 .search {
+      display:flex; align-items:center; gap:8px; height:34px; border-radius:11px;
+      padding:0 10px; color: var(--dim); font-size:12px; margin-bottom:6px;
+      background: var(--track);
+      box-shadow: inset 1px 1px 0 var(--counter), inset -1px -1px 0 var(--rim-soft);
+    }
+    #mup-rim2 .search svg { width:14px; height:14px; }
+    #mup-rim2 .search > span { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    #mup-rim2 .search kbd {
+      flex:none; margin-left:6px; font: inherit; font-size:10px; color: var(--dim);
+      border:1px solid var(--sep); border-radius:5px; padding:1px 5px;
+    }
+    #mup-rim2 .nav-item {
+      display:flex; align-items:center; gap:10px; height:38px; padding:0 10px;
+      border-radius:11px; color: var(--muted); font-size:13px;
+      transition: background .18s ease, color .18s ease, transform .18s ease;
+    }
+    #mup-rim2 .nav-item svg { width:15px; height:15px; }
+    #mup-rim2 .nav-item:hover { color: var(--text); background: var(--track); transform: translateX(1px); }
+    #mup-rim2 .nav-item.active {
+      color: var(--primary-text); font-weight:600;
+      background: linear-gradient(180deg, rgba(106,102,245,.22), rgba(106,102,245,.10));
+      box-shadow: inset 1px 1px 0 var(--rim), inset 0 0 0 1px rgba(122,118,255,.16);
+    }
+    #mup-rim2 .side-label { margin:15px 10px 5px; color: var(--primary-text); font-size:11px; font-weight:600; letter-spacing:.4px; }
+    #mup-rim2 .pl-row {
+      display:flex; align-items:center; gap:10px; height:40px; padding:0 8px;
+      border-radius:11px; color: var(--muted); font-size:12.5px;
+      transition: background .18s ease, color .18s ease;
+    }
+    #mup-rim2 .pl-row:hover { background: var(--track); color: var(--text); }
+    #mup-rim2 .pl-row.active {
+      color: var(--primary-text);
+      background: linear-gradient(180deg, rgba(106,102,245,.20), rgba(106,102,245,.08));
+      box-shadow: inset 1px 1px 0 var(--rim);
+    }
+    #mup-rim2 .pl-row .count { margin-left:auto; font-size:11px; opacity:.75; }
+    #mup-rim2 .tile { width:24px; height:24px; border-radius:8px; display:grid; place-items:center; color:#fff; flex:none; }
+    #mup-rim2 .tile svg { width:13px; height:13px; }
+    #mup-rim2 .t-indigo { background:linear-gradient(145deg,#7a76ff,#4f4ad4); box-shadow: inset 1px 1px 0 rgba(255,255,255,.35); }
+    #mup-rim2 .t-teal { background:linear-gradient(145deg,#45d6cd,#1e9c9b); box-shadow: inset 1px 1px 0 rgba(255,255,255,.35); }
+    #mup-rim2 .t-amber { background:linear-gradient(145deg,#f6bd6a,#dc8f2c); box-shadow: inset 1px 1px 0 rgba(255,255,255,.35); }
+    #mup-rim2 .t-rose { background:linear-gradient(145deg,#f285a3,#c94d74); box-shadow: inset 1px 1px 0 rgba(255,255,255,.35); }
+    #mup-rim2 .t-slate { background:linear-gradient(145deg,#7d8194,#4a4d5c); box-shadow: inset 1px 1px 0 rgba(255,255,255,.28); }
+    #mup-rim2 .t-subtle {
+      background: linear-gradient(145deg, rgba(255,255,255,.10), rgba(255,255,255,.035));
+      color: var(--muted); box-shadow: inset 1px 1px 0 rgba(255,255,255,.14);
+    }
+    #mup-rim2 .theme-light .t-subtle {
+      background: linear-gradient(145deg, rgba(255,255,255,.9), rgba(232,233,245,.8));
+      color: var(--dim); box-shadow: inset 1px 1px 0 #fff;
+    }
+    #mup-rim2 .content { flex:1; min-width:0; display:flex; flex-direction:column; min-height:0; }
+    #mup-rim2 .deck {
+      position:relative; border-radius:18px; padding:14px 16px 16px; margin-bottom:10px;
+      background: linear-gradient(180deg, rgba(255,255,255,.030), rgba(0,0,0,.13));
+      border:1px solid rgba(255,255,255,.045);
+      box-shadow:
+        inset 1px 1px 0 rgba(255,255,255,.09),
+        inset 0 -24px 32px -26px rgba(0,0,0,.72),
+        0 16px 32px -22px var(--shadow);
+    }
+    #mup-rim2 .theme-light .deck {
+      background: linear-gradient(180deg, rgba(255,255,255,.72), rgba(255,255,255,.5));
+      border:1px solid rgba(255,255,255,.65);
+      box-shadow:
+        inset 1px 1px 0 rgba(255,255,255,.9),
+        inset 0 -24px 32px -26px rgba(68,64,100,.12),
+        0 16px 32px -22px rgba(68,64,100,.12);
+    }
+    #mup-rim2 .deck::after {
+      content:""; position:absolute; left:16px; right:16px; bottom:0; height:1px;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,.12), transparent);
+    }
+    #mup-rim2 .theme-light .deck::after {
+      background: linear-gradient(90deg, transparent, rgba(26,27,34,.08), transparent);
+    }
+    #mup-rim2 .deck .pl-header { padding:0; }
+    #mup-rim2 .ph {
+      display:grid; place-items:center; border-radius:12px; flex:none;
+      background: linear-gradient(160deg, rgba(78,81,102,.46), rgba(38,40,50,.52));
+      border:1px solid var(--rim-soft);
+      box-shadow: inset 1px 1px 0 var(--rim), inset -1px -1px 0 var(--counter);
+      color:#8e92c8;
+    }
+    #mup-rim2 .theme-light .ph { background: linear-gradient(160deg,#f4f5fb,#e3e5f2); color:#7c80b8; }
+    #mup-rim2 .ph svg { width:38%; height:38%; opacity:.9; }
+    #mup-rim2 .cover-glow { box-shadow: 0 18px 36px -12px rgba(96,84,241,.45), inset 1px 1px 0 var(--rim); }
+    #mup-rim2 .pl-header { display:flex; align-items:flex-end; gap:16px; padding:6px 4px 12px; }
+    #mup-rim2 .pl-header.deck { padding:14px 16px 16px; margin-bottom:10px; }
+    #mup-rim2 .pl-info { display:flex; flex-direction:column; gap:6px; min-width:0; }
+    #mup-rim2 .pl-title { margin:0; font-size:20px; font-weight:600; letter-spacing:.2px; }
+    #mup-rim2 .pl-meta { margin:0; color: var(--muted); font-size:12px; }
+    #mup-rim2 .actions { display:flex; align-items:center; gap:10px; margin-top:4px; }
+    #mup-rim2 .btn {
+      font-family:inherit; color: var(--text); cursor:pointer;
+      border:1px solid var(--rim-soft); border-radius:11px; height:34px;
+      display:inline-flex; align-items:center; gap:7px; padding:0 16px; font-size:13px;
+      background: linear-gradient(180deg, var(--surface), var(--surface-2));
+      box-shadow: inset 1px 1px 0 var(--rim), 0 8px 18px -8px var(--shadow);
+      transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+    }
+    #mup-rim2 .btn svg { width:14px; height:14px; }
+    #mup-rim2 .btn:hover { transform: translateY(-1px); border-color: rgba(122,118,255,.35); }
+    #mup-rim2 .btn:active { transform: translateY(0) scale(.985); }
+    #mup-rim2 .btn.primary {
+      color:#fff; font-weight:600; border-color: rgba(255,255,255,.16); position:relative;
+      background: linear-gradient(180deg,#7571ff,#5752d9);
+      box-shadow: inset 1px 1px 0 rgba(255,255,255,.35), 0 10px 22px -8px rgba(86,81,216,.7);
+    }
+    #mup-rim2 .btn.primary::after {
+      content:""; position:absolute; left:18%; right:18%; bottom:-1px; height:1px;
+      background: linear-gradient(90deg, transparent, #c9c7ff, transparent);
+      box-shadow: 0 0 12px rgba(143,139,255,.85);
+    }
+    #mup-rim2 .btn.icon { width:34px; padding:0; justify-content:center; color: var(--muted); }
+    #mup-rim2 .cols {
+      display:grid; grid-template-columns:1fr 180px 64px;
+      padding:2px 8px 6px 72px; color: var(--dim); font-size:11px;
+    }
+    #mup-rim2 .rows { flex:1; min-height:0; display:flex; flex-direction:column; }
+    #mup-rim2 .row {
+      display:grid; grid-template-columns:48px 1fr 180px 64px; align-items:center; gap:12px;
+      padding:0 8px; border-radius:12px; height:64px;
+      transition: background .18s ease;
+    }
+    #mup-rim2 .row + .row { box-shadow: inset 0 1px 0 var(--sep); }
+    #mup-rim2 .row:hover { background: var(--track); }
+    #mup-rim2 .row .ph { width:48px; height:48px; }
+    #mup-rim2 .row .title { font-size:13px; }
+    #mup-rim2 .row .artist { font-size:11px; color: var(--muted); margin-top:2px; }
+    #mup-rim2 .row .album, #mup-rim2 .row .dur { font-size:12px; color: var(--muted); }
+    #mup-rim2 .row.playing {
+      background: linear-gradient(180deg, rgba(106,102,245,.15), rgba(106,102,245,.06));
+      box-shadow: inset 1px 1px 0 var(--rim), inset 0 0 0 1px rgba(122,118,255,.12);
+    }
+    #mup-rim2 .row.playing .title { color: var(--primary-text); }
+    #mup-rim2 .eq { display:inline-flex; align-items:flex-end; gap:2px; height:10px; margin-right:6px; }
+    #mup-rim2 .eq i { width:2px; border-radius:1px; background: var(--primary-2); }
+    #mup-rim2 .eq i:nth-child(1){height:5px} #mup-rim2 .eq i:nth-child(2){height:9px}
+    #mup-rim2 .eq i:nth-child(3){height:7px} #mup-rim2 .eq i:nth-child(4){height:10px}
+    #mup-rim2 .mini-lyrics {
+      flex:none; height:26px; display:flex; align-items:center; justify-content:center;
+      color: var(--muted); font-size:11px;
+      background: linear-gradient(180deg, transparent, var(--bg0));
+    }
+    #mup-rim2 .playbar {
+      flex:none; position:relative; margin:0 16px 16px; padding:13px 20px 16px;
+      border-radius:18px;
+      background: linear-gradient(180deg, var(--surface), var(--surface-2));
+      border:1px solid var(--rim-soft);
+      box-shadow:
+        inset 1px 1px 0 var(--rim),
+        inset -1px -1px 0 var(--counter),
+        0 30px 60px -22px var(--shadow);
+      backdrop-filter: blur(20px);
+    }
+    #mup-rim2 .playbar::before {
+      content:""; position:absolute; top:-1px; left:50%; transform:translateX(-50%);
+      width:44%; height:1px;
+      background: linear-gradient(90deg, transparent, var(--primary-2), transparent);
+      box-shadow: 0 0 16px var(--primary);
+    }
+    #mup-rim2 .playbar::after {
+      content:""; position:absolute; left:12%; right:12%; top:-26px; height:26px; pointer-events:none;
+      background: radial-gradient(50% 100% at 50% 100%, rgba(106,102,245,.18), transparent 70%);
+    }
+    #mup-rim2 .pb-progress {
+      display:flex; align-items:center; gap:10px; width:380px; max-width:100%;
+      font-size:11px; font-variant-numeric: tabular-nums;
+      background: transparent; border: 0; padding: 0; margin: 0; height: auto; border-radius: 0;
+    }
+    #mup-rim2 .pb-progress span { min-width:38px; color: var(--muted); }
+    #mup-rim2 .pb-progress span:first-child { text-align:right; }
+    #mup-rim2 .pb-progress span:last-child { text-align:left; }
+    #mup-rim2 .track {
+      flex:1; height:2px; border-radius:1px; background: rgba(255,255,255,.26); position:relative;
+    }
+    #mup-rim2 .theme-light .track { background: rgba(26,27,34,.20); }
+    #mup-rim2 .track .fill {
+      position:absolute; left:0; top:0; bottom:0; width:45%; border-radius:1px;
+      background: rgba(255,255,255,.94);
+    }
+    #mup-rim2 .theme-light .track .fill { background: rgba(26,27,34,.78); }
+    #mup-rim2 .track .thumb {
+      position:absolute; left:45%; top:50%; width:8px; height:8px; margin:-4px 0 0 -4px;
+      border-radius:50%; background:#fff; box-shadow: 0 0 4px rgba(255,255,255,.6);
+      opacity:0; transition: opacity .15s ease, transform .15s ease;
+    }
+    #mup-rim2 .theme-light .track .thumb {
+      background:#2a2b33; box-shadow: 0 0 0 2px rgba(255,255,255,.9), 0 0 4px rgba(26,27,34,.18);
+    }
+    #mup-rim2 .track:hover .thumb { opacity:1; transform: scale(1.15); }
+    #mup-rim2 .pb-main { display:grid; grid-template-columns:1fr auto 1fr; align-items:center; }
+    #mup-rim2 .pb-left { grid-column:1; justify-self:start; display:flex; align-items:center; gap:12px; min-width:0; }
+    #mup-rim2 .pb-left .ph { width:56px; height:56px; }
+    #mup-rim2 .pb-info { min-width:0; display:flex; flex-direction:column; gap:3px; }
+    #mup-rim2 .pb-title { display:flex; align-items:center; gap:8px; font-size:13.5px; font-weight:600; }
+    #mup-rim2 .pb-title svg { width:14px; height:14px; color: var(--danger); }
+    #mup-rim2 .pb-artist { color: var(--muted); font-size:11px; }
+    #mup-rim2 .pb-center { grid-column:2; justify-self:center; display:flex; flex-direction:column; align-items:center; gap:9px; color: var(--muted); }
+    #mup-rim2 .pb-controls { display:flex; align-items:center; justify-content:center; gap:15px; }
+    #mup-rim2 .pb-controls svg { width:18px; height:18px; }
+    #mup-rim2 .pb-play {
+      width:44px; height:44px; border-radius:50%; display:grid; place-items:center; color:#fff;
+      background: linear-gradient(160deg,#7a76ff,#5752d9);
+      box-shadow: inset 1px 1px 0 rgba(255,255,255,.4), 0 10px 24px -6px rgba(86,81,216,.75), 0 0 0 5px rgba(106,102,245,.08);
+      transition: transform .16s ease, box-shadow .16s ease;
+    }
+    #mup-rim2 .pb-play:hover { transform: scale(1.04); box-shadow: inset 1px 1px 0 rgba(255,255,255,.45), 0 12px 28px -6px rgba(86,81,216,.9), 0 0 0 7px rgba(106,102,245,.12); }
+    #mup-rim2 .pb-play svg { width:18px; height:18px; }
+    #mup-rim2 .pb-right { grid-column:3; justify-self:end; display:flex; align-items:center; gap:13px; color: var(--muted); }
+    #mup-rim2 .pb-right svg { width:16px; height:16px; }
+    #mup-rim2 .vol { width:96px; height:3px; border-radius:2px; background: var(--track); position:relative; box-shadow: inset 0 1px 1px var(--counter); }
+    #mup-rim2 .vol i { position:absolute; left:0; top:0; bottom:0; width:62%; border-radius:2px; background: linear-gradient(90deg,var(--primary),var(--primary-2)); box-shadow: 0 0 8px var(--primary); }
+
+    /* 沉浸页 */
+    #mup-rim2 .player-top { flex:none; display:flex; align-items:center; gap:12px; padding:0 28px; height:44px; }
+    #mup-rim2 .player-heading { font-size:13px; color: var(--muted); letter-spacing:.3px; }
+    #mup-rim2 .player-tools { margin-left:auto; display:flex; gap:16px; color: var(--muted); }
+    #mup-rim2 .player-tools svg { width:16px; height:16px; }
+    #mup-rim2 .player-main { flex:1; min-height:0; display:grid; grid-template-columns:1fr 1fr; padding:8px 28px 16px; align-items:center; }
+    #mup-rim2 .player-left { display:flex; align-items:center; justify-content:center; height:100%; }
+    #mup-rim2 .player-main > .big-cover-wrap { justify-self:center; align-self:center; }
+    #mup-rim2 .big-cover-wrap { position:relative; flex:none; }
+    #mup-rim2 .big-cover {
+      width:300px; height:300px; border-radius:28px; position:relative; z-index:1;
+      background: linear-gradient(160deg, rgba(96,84,241,.55), rgba(30,32,44,.9));
+      box-shadow: inset 1px 1px 0 rgba(255,255,255,.28), 0 34px 70px -18px rgba(40,30,120,.55);
+      display:grid; place-items:center; color: rgba(255,255,255,.9);
+    }
+    #mup-rim2 .big-cover svg { width:96px; height:96px; opacity:.9; }
+    #mup-rim2 .big-cover-wrap::after {
+      content:""; position:absolute; inset:12% 8% -6%; z-index:0; filter:blur(40px);
+      background: radial-gradient(50% 50% at 50% 50%, rgba(106,102,245,.55), transparent 70%);
+    }
+    #mup-rim2 .lyrics { position:relative; min-width:0; height:100%; display:flex; flex-direction:column; align-items:flex-start; justify-content:center; gap:14px; padding-left:48px; border-left:1px solid var(--sep); text-align:left; }
+    #mup-rim2 .lyric { font-size:14.5px; color: var(--muted); transition: color .2s ease, transform .2s ease; line-height:1.55; }
+    #mup-rim2 .lyric.active { font-size:18px; font-weight:600; color: var(--text); transform:none; }
+    #mup-rim2 .app.is-player .pb-left .ph { display:none; }
+    #mup-rim2 .lyric.near { color: var(--muted); }
+    #mup-rim2 .back {
+      width:32px; height:32px; border-radius:10px; display:grid; place-items:center;
+      color: var(--muted); border:1px solid var(--rim-soft);
+      background: linear-gradient(180deg, var(--surface), var(--surface-2));
+      box-shadow: inset 1px 1px 0 var(--rim), 0 8px 18px -10px var(--shadow);
+    }
+    #mup-rim2 .back svg { width:16px; height:16px; }
+
+    /* 设置页 */
+    #mup-rim2 .settings-main { flex:1; min-height:0; display:flex; align-items:center; justify-content:center; padding:4px 24px 16px; }
+    #mup-rim2 .settings-card { width:640px; max-width:100%; border-radius:22px; padding:22px 24px; }
+    #mup-rim2 .settings-card {
+      background: linear-gradient(180deg, rgba(44,46,58,.80), rgba(26,28,36,.86));
+    }
+    #mup-rim2 .theme-light .settings-card {
+      background: linear-gradient(180deg, rgba(255,255,255,.88), rgba(248,249,253,.94));
+    }
+    #mup-rim2 .set-title { margin:0 0 6px; font-size:18px; font-weight:600; }
+    #mup-rim2 .set-sub { margin:0 0 10px; color: var(--muted); font-size:12px; }
+    #mup-rim2 .set-row { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 0; border-top:1px solid var(--sep); }
+    #mup-rim2 .set-row:first-of-type { border-top:0; }
+    #mup-rim2 .set-label { font-size:13px; }
+    #mup-rim2 .set-hint { color: var(--muted); font-size:11px; margin-top:3px; }
+    #mup-rim2 .segmented {
+      display:inline-flex; padding:3px; border-radius:10px; background: var(--track);
+      box-shadow: inset 1px 1px 0 var(--counter);
+    }
+    #mup-rim2 .segmented span { padding:6px 12px; border-radius:8px; font-size:12px; color: var(--muted); }
+    #mup-rim2 .segmented .on {
+      color: var(--text); background: var(--surface-2);
+      box-shadow: inset 1px 1px 0 var(--rim), 0 4px 10px -6px var(--shadow);
+    }
+    #mup-rim2 .switch {
+      width:38px; height:22px; border-radius:11px; background: var(--track); position:relative;
+      box-shadow: inset 1px 1px 0 var(--counter);
+    }
+    #mup-rim2 .switch::after {
+      content:""; position:absolute; top:3px; left:3px; width:16px; height:16px; border-radius:50%;
+      background:#fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: left .18s ease;
+    }
+    #mup-rim2 .switch.on { background: linear-gradient(90deg,var(--primary),var(--primary-2)); box-shadow: inset 1px 1px 0 rgba(255,255,255,.3), 0 0 12px var(--primary); }
+    #mup-rim2 .switch.on::after { left:19px; }
+    #mup-rim2 .chips { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+    #mup-rim2 .chip {
+      font-family:"Consolas", monospace; font-size:11px; color: var(--primary-text);
+      background: var(--track); border:1px solid var(--sep); border-radius:6px; padding:2px 7px;
+    }
+    @media (max-width: 720px) {
+      #mup-rim2 .app { width:100%; height:auto; }
+      #mup-rim2 .sidebar { display:none; }
+      #mup-rim2 .pb-left, #mup-rim2 .pb-right { display:none; }
+      #mup-rim2 .col.album, #mup-rim2 .col.dur { display:none; }
+      #mup-rim2 .cols, #mup-rim2 .row { grid-template-columns:48px 1fr; }
+      #mup-rim2 .player-main { flex-direction:column; align-items:flex-start; }
+      #mup-rim2 .big-cover { width:200px; height:200px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #mup-rim2 * { transition:none !important; }
+    }
+  </style>
+
+  <div class="viz-carousel" aria-label="音珏 - Mup 界面方案">
+    <section data-variant="曲库 · 暗色" aria-label="曲库页 暗色">
+      <div class="stage theme-dark">
+        <div class="app">
+          <header class="titlebar">
+            <span class="brand"><span class="logo"><i data-lucide="audio-lines" aria-hidden="true"></i></span>音珏 - Mup</span>
+            <div class="winbtns"><i data-lucide="settings" aria-hidden="true"></i><i data-lucide="minus" aria-hidden="true"></i><i data-lucide="square" aria-hidden="true"></i><i data-lucide="x" aria-hidden="true"></i></div>
+          </header>
+          <div class="main">
+            <aside class="sidebar">
+              <div class="search"><i data-lucide="search" aria-hidden="true"></i><span>搜索歌曲、歌手</span><kbd>Ctrl F</kbd></div>
+              <div class="nav-item active"><i data-lucide="home" aria-hidden="true"></i>首页</div>
+              <div class="nav-item"><i data-lucide="heart" aria-hidden="true"></i>收藏</div>
+              <div class="nav-item"><i data-lucide="clock" aria-hidden="true"></i>最近播放</div>
+              <div class="nav-item"><i data-lucide="user-round" aria-hidden="true"></i>歌手</div>
+              <div class="nav-item"><i data-lucide="disc-3" aria-hidden="true"></i>专辑</div>
+              <div class="side-label">我的歌单</div>
+              <div class="pl-row active"><span class="tile t-indigo"><i data-lucide="music-4" aria-hidden="true"></i></span>我喜欢<span class="count">2023</span></div>
+              <div class="pl-row"><span class="tile t-subtle"><i data-lucide="music-4" aria-hidden="true"></i></span>华语流行<span class="count">186</span></div>
+              <div class="pl-row"><span class="tile t-subtle"><i data-lucide="music-4" aria-hidden="true"></i></span>深夜电台<span class="count">94</span></div>
+              
+            </aside>
+            <section class="content">
+              <div class="pl-header">
+                <div class="ph cover-glow" style="width:96px;height:96px"><i data-lucide="music-4" aria-hidden="true"></i></div>
+                <div class="pl-info">
+                  <h1 class="pl-title">我喜欢</h1>
+                  <p class="pl-meta">2023 首 · 8 小时 42 分</p>
+                  <div class="actions">
+                    <button class="btn primary"><i data-lucide="play" aria-hidden="true"></i>播放全部</button>
+                    <button class="btn"><i data-lucide="shuffle" aria-hidden="true"></i>随机播放</button>
+                    <button class="btn icon" aria-label="重新加载"><i data-lucide="rotate-cw" aria-hidden="true"></i></button>
+                    <button class="btn icon" aria-label="自定义封面"><i data-lucide="pencil" aria-hidden="true"></i></button>
+                  </div>
+                </div>
+              </div>
+              <div class="cols"><span>歌名 / 歌手</span><span class="col album">专辑</span><span class="col dur">时长</span></div>
+              <div class="rows">
+                <div class="row playing"><div class="ph"><i data-lucide="music-4" aria-hidden="true"></i></div><div><div class="title"><span class="eq"><i></i><i></i><i></i><i></i></span>旅行家说</div><div class="artist">毛不易</div></div><div class="album">幼鸟指南</div><div class="dur">05:09</div></div>
+                <div class="row"><div class="ph"><i data-lucide="music-4" aria-hidden="true"></i></div><div><div class="title">平凡之路</div><div class="artist">朴树</div></div><div class="album">猎户星座</div><div class="dur">05:03</div></div>
+                <div class="row"><div class="ph"><i data-lucide="music-4" aria-hidden="true"></i></div><div><div class="title">起风了</div><div class="artist">买辣椒也用券</div></div><div class="album">起风了</div><div class="dur">05:25</div></div>
+                <div class="row"><div class="ph"><i data-lucide="music-4" aria-hidden="true"></i></div><div><div class="title">海底</div><div class="artist">一支榴莲</div></div><div class="album">海底</div><div class="dur">04:16</div></div>
+              </div>
+              <div class="mini-lyrics">听说远方 最神秘的角落</div>
+            </section>
+          </div>
+          <footer class="playbar">
+            
+            <div class="pb-main">
+              <div class="pb-left"><div class="ph"><i data-lucide="music-4" aria-hidden="true"></i></div><div class="pb-info"><div class="pb-title"><i data-lucide="heart" aria-hidden="true"></i>旅行家说</div><div class="pb-artist">毛不易 · 幼鸟指南</div></div></div>
+              <div class="pb-center"><div class="pb-controls"><i data-lucide="shuffle" aria-hidden="true"></i><i data-lucide="skip-back" aria-hidden="true"></i><span class="pb-play"><i data-lucide="pause" aria-hidden="true"></i></span><i data-lucide="skip-forward" aria-hidden="true"></i><i data-lucide="repeat" aria-hidden="true"></i></div><div class="pb-progress"><span>01:23</span><div class="track"><i class="fill"></i><i class="thumb"></i></div><span>05:09</span></div></div>
+              <div class="pb-right"><i data-lucide="list-music" aria-hidden="true"></i><i data-lucide="volume-2" aria-hidden="true"></i><div class="vol"><i></i></div></div>
+            </div>
+          </footer>
+        </div>
+      </div>
+    </section>
+    <section data-variant="曲库 · 亮色" aria-label="曲库页 亮色" hidden>
+      <div class="stage theme-light">
+        <div class="app">
+          <header class="titlebar">
+            <span class="brand"><span class="logo"><i data-lucide="audio-lines" aria-hidden="true"></i></span>音珏 - Mup</span>
+            <div class="winbtns"><i data-lucide="settings" aria-hidden="true"></i><i data-lucide="minus" aria-hidden="true"></i><i data-lucide="square" aria-hidden="true"></i><i data-lucide="x" aria-hidden="true"></i></div>
+          </header>
+          <div class="main">
+            <aside class="sidebar">
+              <div class="search"><i data-lucide="search" aria-hidden="true"></i><span>搜索歌曲、歌手</span><kbd>Ctrl F</kbd></div>
+              <div class="nav-item active"><i data-lucide="home" aria-hidden="true"></i>首页</div>
+              <div class="nav-item"><i data-lucide="heart" aria-hidden="true"></i>收藏</div>
+              <div class="nav-item"><i data-lucide="clock" aria-hidden="true"></i>最近播放</div>
+              <div class="nav-item"><i data-lucide="user-round" aria-hidden="true"></i>歌手</div>
+              <div class="nav-item"><i data-lucide="disc-3" aria-hidden="true"></i>专辑</div>
+              <div class="side-label">我的歌单</div>
+              <div class="pl-row active"><span class="tile t-indigo"><i data-lucide="music-4" aria-hidden="true"></i></span>我喜欢<span class="count">2023</span></div>
+              <div class="pl-row"><span class="tile t-subtle"><i data-lucide="music-4" aria-hidden="true"></i></span>华语流行<span class="count">186</span></div>
+              <div class="pl-row"><span class="tile t-subtle"><i data-lucide="music-4" aria-hidden="true"></i></span>深夜电台<span class="count">94</span></div>
+              
+            </aside>
+            <section class="content">
+              <div class="pl-header">
+                <div class="ph cover-glow" style="width:96px;height:96px"><i data-lucide="music-4" aria-hidden="true"></i></div>
+                <div class="pl-info">
+                  <h1 class="pl-title">我喜欢</h1>
+                  <p class="pl-meta">2023 首 · 8 小时 42 分</p>
+                  <div class="actions">
+                    <button class="btn primary"><i data-lucide="play" aria-hidden="true"></i>播放全部</button>
+                    <button class="btn"><i data-lucide="shuffle" aria-hidden="true"></i>随机播放</button>
+                    <button class="btn icon" aria-label="重新加载"><i data-lucide="rotate-cw" aria-hidden="true"></i></button>
+                    <button class="btn icon" aria-label="自定义封面"><i data-lucide="pencil" aria-hidden="true"></i></button>
+                  </div>
+                </div>
+              </div>
+              <div class="cols"><span>歌名 / 歌手</span><span class="col album">专辑</span><span class="col dur">时长</span></div>
+              <div class="rows">
+                <div class="row playing"><div class="ph"><i data-lucide="music-4" aria-hidden="true"></i></div><div><div class="title"><span class="eq"><i></i><i></i><i></i><i></i></span>旅行家说</div><div class="artist">毛不易</div></div><div class="album">幼鸟指南</div><div class="dur">05:09</div></div>
+                <div class="row"><div class="ph"><i data-lucide="music-4" aria-hidden="true"></i></div><div><div class="title">平凡之路</div><div class="artist">朴树</div></div><div class="album">猎户星座</div><div class="dur">05:03</div></div>
+                <div class="row"><div class="ph"><i data-lucide="music-4" aria-hidden="true"></i></div><div><div class="title">起风了</div><div class="artist">买辣椒也用券</div></div><div class="album">起风了</div><div class="dur">05:25</div></div>
+                <div class="row"><div class="ph"><i data-lucide="music-4" aria-hidden="true"></i></div><div><div class="title">海底</div><div class="artist">一支榴莲</div></div><div class="album">海底</div><div class="dur">04:16</div></div>
+              </div>
+              <div class="mini-lyrics">听说远方 最神秘的角落</div>
+            </section>
+          </div>
+          <footer class="playbar">
+            
+            <div class="pb-main">
+              <div class="pb-left"><div class="ph"><i data-lucide="music-4" aria-hidden="true"></i></div><div class="pb-info"><div class="pb-title"><i data-lucide="heart" aria-hidden="true"></i>旅行家说</div><div class="pb-artist">毛不易 · 幼鸟指南</div></div></div>
+              <div class="pb-center"><div class="pb-controls"><i data-lucide="shuffle" aria-hidden="true"></i><i data-lucide="skip-back" aria-hidden="true"></i><span class="pb-play"><i data-lucide="pause" aria-hidden="true"></i></span><i data-lucide="skip-forward" aria-hidden="true"></i><i data-lucide="repeat" aria-hidden="true"></i></div><div class="pb-progress"><span>01:23</span><div class="track"><i class="fill"></i><i class="thumb"></i></div><span>05:09</span></div></div>
+              <div class="pb-right"><i data-lucide="list-music" aria-hidden="true"></i><i data-lucide="volume-2" aria-hidden="true"></i><div class="vol"><i></i></div></div>
+            </div>
+          </footer>
+        </div>
+      </div>
+    </section>
+    <section data-variant="沉浸页 · 暗色" aria-label="沉浸页 暗色" hidden>
+      <div class="stage theme-dark">
+        <div class="app is-player">
+          <header class="titlebar">
+            <span class="brand"><span class="logo"><i data-lucide="audio-lines" aria-hidden="true"></i></span>音珏 - Mup</span>
+            <div class="winbtns"><i data-lucide="settings" aria-hidden="true"></i><i data-lucide="minus" aria-hidden="true"></i><i data-lucide="square" aria-hidden="true"></i><i data-lucide="x" aria-hidden="true"></i></div>
+          </header>
+          <div class="player-top">
+            <div class="back"><i data-lucide="arrow-left" aria-hidden="true"></i></div>
+            <div class="player-heading">正在播放</div>
+            <div class="player-tools"><i data-lucide="heart" aria-hidden="true"></i><i data-lucide="more-horizontal" aria-hidden="true"></i></div>
+          </div>
+          <div class="player-main">
+            <div class="big-cover-wrap">
+              <div class="big-cover"><i data-lucide="music-4" aria-hidden="true"></i></div>
+            </div>
+            <div class="lyrics">
+              <div class="lyric">听说远方 最神秘的角落</div>
+              <div class="lyric near">每晚都燃起篝火 相爱的人围坐</div>
+              <div class="lyric near">岁月也分外温柔 流过时变成歌</div>
+              <div class="lyric active">被他们 轻声唱着</div>
+              <div class="lyric near">你要去吗 趁天边还有光</div>
+              <div class="lyric near">就像你来时一样 不必在意方向</div>
+              <div class="lyric near">记得带上你当初 那少年的模样</div>
+            </div>
+          </div>
+          <footer class="playbar">
+            
+            <div class="pb-main">
+              <div class="pb-left"><div class="ph"><i data-lucide="music-4" aria-hidden="true"></i></div><div class="pb-info"><div class="pb-title"><i data-lucide="heart" aria-hidden="true"></i>旅行家说</div><div class="pb-artist">毛不易 · 幼鸟指南</div></div></div>
+              <div class="pb-center"><div class="pb-controls"><i data-lucide="shuffle" aria-hidden="true"></i><i data-lucide="skip-back" aria-hidden="true"></i><span class="pb-play"><i data-lucide="pause" aria-hidden="true"></i></span><i data-lucide="skip-forward" aria-hidden="true"></i><i data-lucide="repeat" aria-hidden="true"></i></div><div class="pb-progress"><span>01:23</span><div class="track"><i class="fill"></i><i class="thumb"></i></div><span>05:09</span></div></div>
+              <div class="pb-right"><i data-lucide="list-music" aria-hidden="true"></i><i data-lucide="volume-2" aria-hidden="true"></i><div class="vol"><i></i></div></div>
+            </div>
+          </footer>
+        </div>
+      </div>
+    </section>
+    <section data-variant="沉浸页 · 亮色" aria-label="沉浸页 亮色" hidden>
+      <div class="stage theme-light">
+        <div class="app is-player">
+          <header class="titlebar">
+            <span class="brand"><span class="logo"><i data-lucide="audio-lines" aria-hidden="true"></i></span>音珏 - Mup</span>
+            <div class="winbtns"><i data-lucide="settings" aria-hidden="true"></i><i data-lucide="minus" aria-hidden="true"></i><i data-lucide="square" aria-hidden="true"></i><i data-lucide="x" aria-hidden="true"></i></div>
+          </header>
+          <div class="player-top">
+            <div class="back"><i data-lucide="arrow-left" aria-hidden="true"></i></div>
+            <div class="player-heading">正在播放</div>
+            <div class="player-tools"><i data-lucide="heart" aria-hidden="true"></i><i data-lucide="more-horizontal" aria-hidden="true"></i></div>
+          </div>
+          <div class="player-main">
+            <div class="big-cover-wrap">
+              <div class="big-cover"><i data-lucide="music-4" aria-hidden="true"></i></div>
+            </div>
+            <div class="lyrics">
+              <div class="lyric">听说远方 最神秘的角落</div>
+              <div class="lyric near">每晚都燃起篝火 相爱的人围坐</div>
+              <div class="lyric near">岁月也分外温柔 流过时变成歌</div>
+              <div class="lyric active">被他们 轻声唱着</div>
+              <div class="lyric near">你要去吗 趁天边还有光</div>
+              <div class="lyric near">就像你来时一样 不必在意方向</div>
+              <div class="lyric near">记得带上你当初 那少年的模样</div>
+            </div>
+          </div>
+          <footer class="playbar">
+            
+            <div class="pb-main">
+              <div class="pb-left"><div class="ph"><i data-lucide="music-4" aria-hidden="true"></i></div><div class="pb-info"><div class="pb-title"><i data-lucide="heart" aria-hidden="true"></i>旅行家说</div><div class="pb-artist">毛不易 · 幼鸟指南</div></div></div>
+              <div class="pb-center"><div class="pb-controls"><i data-lucide="shuffle" aria-hidden="true"></i><i data-lucide="skip-back" aria-hidden="true"></i><span class="pb-play"><i data-lucide="pause" aria-hidden="true"></i></span><i data-lucide="skip-forward" aria-hidden="true"></i><i data-lucide="repeat" aria-hidden="true"></i></div><div class="pb-progress"><span>01:23</span><div class="track"><i class="fill"></i><i class="thumb"></i></div><span>05:09</span></div></div>
+              <div class="pb-right"><i data-lucide="list-music" aria-hidden="true"></i><i data-lucide="volume-2" aria-hidden="true"></i><div class="vol"><i></i></div></div>
+            </div>
+          </footer>
+        </div>
+      </div>
+    </section>
+    <section data-variant="设置 · 暗色" aria-label="设置页 暗色" hidden>
+      <div class="stage theme-dark">
+        <div class="app">
+          <header class="titlebar">
+            <span class="brand"><span class="logo"><i data-lucide="audio-lines" aria-hidden="true"></i></span>音珏 - Mup</span>
+            <div class="winbtns"><i data-lucide="settings" aria-hidden="true"></i><i data-lucide="minus" aria-hidden="true"></i><i data-lucide="square" aria-hidden="true"></i><i data-lucide="x" aria-hidden="true"></i></div>
+          </header>
+          <div class="settings-main">
+            <div class="settings-card panel">
+              <h2 class="set-title">设置</h2>
+              <p class="set-sub">所有改动即时生效</p>
+              <div class="set-row">
+                <div><div class="set-label">连接设置</div><div class="set-hint">music.example.com:14040 · demo_user</div></div>
+                <button class="btn">重新填写</button>
+              </div>
+              <div class="set-row">
+                <div><div class="set-label">外观主题</div><div class="set-hint">跟随系统会自动切换深浅色</div></div>
+                <div class="segmented"><span>跟随系统</span><span>浅色</span><span class="on">深色</span></div>
+              </div>
+              <div class="set-row">
+                <div><div class="set-label">减少动效</div><div class="set-hint">关闭所有过渡，适合低配设备</div></div>
+                <div class="switch on"></div>
+              </div>
+              <div class="set-row">
+                <div><div class="set-label">开机自启</div><div class="set-hint">登录 Windows 后自动启动</div></div>
+                <div class="switch"></div>
+              </div>
+              <div class="set-row">
+                <div><div class="set-label">快捷键</div><div class="set-hint">可在 config.json 中修改</div></div>
+                <div class="chips"><span class="chip">Ctrl Alt P</span><span class="chip">Ctrl Alt ←</span><span class="chip">Ctrl Alt →</span></div>
+              </div>
+              <div class="set-row">
+                <div><div class="set-label">关于</div><div class="set-hint">基于 PySide6 · Subsonic / Jellyfin</div></div>
+                <div class="set-hint">v0.3.13</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section data-variant="设置 · 亮色" aria-label="设置页 亮色" hidden>
+      <div class="stage theme-light">
+        <div class="app">
+          <header class="titlebar">
+            <span class="brand"><span class="logo"><i data-lucide="audio-lines" aria-hidden="true"></i></span>音珏 - Mup</span>
+            <div class="winbtns"><i data-lucide="settings" aria-hidden="true"></i><i data-lucide="minus" aria-hidden="true"></i><i data-lucide="square" aria-hidden="true"></i><i data-lucide="x" aria-hidden="true"></i></div>
+          </header>
+          <div class="settings-main">
+            <div class="settings-card panel">
+              <h2 class="set-title">设置</h2>
+              <p class="set-sub">所有改动即时生效</p>
+              <div class="set-row">
+                <div><div class="set-label">连接设置</div><div class="set-hint">music.example.com:14040 · demo_user</div></div>
+                <button class="btn">重新填写</button>
+              </div>
+              <div class="set-row">
+                <div><div class="set-label">外观主题</div><div class="set-hint">跟随系统会自动切换深浅色</div></div>
+                <div class="segmented"><span>跟随系统</span><span class="on">浅色</span><span>深色</span></div>
+              </div>
+              <div class="set-row">
+                <div><div class="set-label">减少动效</div><div class="set-hint">关闭所有过渡，适合低配设备</div></div>
+                <div class="switch"></div>
+              </div>
+              <div class="set-row">
+                <div><div class="set-label">开机自启</div><div class="set-hint">登录 Windows 后自动启动</div></div>
+                <div class="switch on"></div>
+              </div>
+              <div class="set-row">
+                <div><div class="set-label">快捷键</div><div class="set-hint">可在 config.json 中修改</div></div>
+                <div class="chips"><span class="chip">Ctrl Alt P</span><span class="chip">Ctrl Alt ←</span><span class="chip">Ctrl Alt →</span></div>
+              </div>
+              <div class="set-row">
+                <div><div class="set-label">关于</div><div class="set-hint">基于 PySide6 · Subsonic / Jellyfin</div></div>
+                <div class="set-hint">v0.3.13</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+
+
+
+
+
