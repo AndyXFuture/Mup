@@ -21,8 +21,11 @@ LIGHT: dict = {
     "primary_text": "#2F2EBE",
     "on_primary": "#FFFFFF",
     "border": QColor(24, 28, 32, 22),
-    "shadow_dark": QColor(154, 166, 191, 120),
-    "shadow_light": QColor(255, 255, 255, 210),
+    # 新拟态阴影强度严格按 DESIGN.md：外凸 = 左上白光 60% + 右下暗影 8%。
+    # 注意：不要再随手调大！alpha 过大时 6 层叠加会把边缘画成 100+ 的硬亮线/近黑暗边，
+    # 表现为「拟态边框变粗」（历史 v0.3.3 / v0.3.12 踩过多次）。
+    "shadow_dark": QColor(154, 166, 191, 24),
+    "shadow_light": QColor(255, 255, 255, 153),
     "danger": "#E8463A",
     "ok": "#1DC981",
 }
@@ -39,8 +42,11 @@ DARK: dict = {
     "primary_text": "#C7C8FF",
     "on_primary": "#FFFFFF",
     "border": QColor(242, 242, 242, 24),
-    "shadow_dark": QColor(0, 0, 0, 160),
-    "shadow_light": QColor(255, 255, 255, 46),
+    # 深色底：暗影 20（≈8%，与 DESIGN.md 一致）、高光 4（深底只需极弱高光）。
+    # 这两个值是离屏渲染逐像素对齐 0.3.2 效果图得出的（顶边 27→38、底边 19→25），
+    # 调大会立刻出现「阴影变粗/硬描边」。改动前请先跑对比再定值。
+    "shadow_dark": QColor(0, 0, 0, 20),
+    "shadow_light": QColor(255, 255, 255, 4),
     "danger": "#F0705E",
     "ok": "#2BD9A0",
 }

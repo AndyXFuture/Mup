@@ -6,7 +6,10 @@ import sys
 from pathlib import Path
 
 APP_NAME = "音珏 - Mup"
-APP_VERSION = "0.3.2"
+APP_VERSION = "0.3.13"
+
+# 退出时等待单个后台线程结束的上限（ms）。QThread 在运行中被析构会让 Qt qFatal 直接终止进程。
+SHUTDOWN_WAIT_MS = 8000
 
 # 打包（PyInstaller 单文件）后 __file__ 指向临时解压目录，需要分别处理：
 #   APP_DIR       → exe 所在目录（config.json / logs 写在这里，持久化）
@@ -23,9 +26,11 @@ LOG_DIR = APP_DIR / "logs"
 
 DEFAULT_CONFIG: dict = {
     "server": {"protocol": "http", "host": "", "port": 14040, "username": "", "password": ""},
-    "player": {"volume": 80, "mode": "list", "last_playlist_id": "", "last_song_id": "", "last_position": 0,
-               "window_size": [1080, 720]},
+    "player": {"volume": 80, "mode": "list", "last_playlist_id": "", "last_playlist_cover_id": "",
+               "last_song_id": "", "last_position": 0,
+               "window_size": [1080, 720], "window_pos": [], "sidebar_width": 204},
     "theme": "system",
+    "ui": {"reduce_motion": False},  # 减少动效：关闭过渡动画（瞬时切换）
     "hotkeys": {
         "play_pause": "Ctrl+Alt+P",
         "next": "Ctrl+Alt+Right",

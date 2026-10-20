@@ -1,16 +1,18 @@
 """歌单页：侧边栏导航 + 主内容（歌曲/专辑/歌手/搜索）+ 底部播放栏（QQ 音乐式三段布局）。"""
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from shutil import copy2
 
 from PySide6.QtCore import QEvent, QModelIndex, QPoint, QPropertyAnimation, QRect, QSize, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QColor, QCursor, QFont, QLinearGradient, QPainter, QPixmap
+from PySide6.QtGui import QColor, QCursor, QFont, QKeySequence, QLinearGradient, QPainter, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QAbstractButton,
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListView,
     QMenu,
     QMessageBox,
@@ -20,18 +22,22 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.config import Config, APP_DIR
+from app.config import Config, APP_DIR, SHUTDOWN_WAIT_MS
 from app.cover_manager import CoverManager
 from app.lyrics import LyricsManager
-from app.player import MODE_LIST, MODE_ORDER, MODE_RANDOM, MODE_SINGLE, Player
+from app.player import MODE_LIST, MODE_ORDER, MODE_RANDOM, MODE_SINGLE, STATE_PLAYING, Player
 from app.subsonic_client import Album, Artist, Playlist, Song, SubsonicClient
-from ui import icons, theme
+from ui import anim, icons, theme
+from ui.anim import mix
 from ui.widgets import (
     AlbumDelegate,
     ArtistDelegate,
     CoverArt,
+    FadeVeil,
     HoverSlider,
+    ListEdgeFade,
     MarqueeLabel,
+    MotionButton,
     NeuButton,
     NeuFrame,
     NeuIconButton,
@@ -54,6 +60,50 @@ _MODE_NAMES = {MODE_LIST: "列表循环", MODE_RANDOM: "随机播放", MODE_SING
 
 _VIEW_SONG, _VIEW_ALBUM, _VIEW_ARTIST, _VIEW_PLACEHOLDER = 0, 1, 2, 3
 
+MAX_PLAYLIST_CACHE = 10  # 内存中最多保留多少个已加载歌单（防止长期使用内存单调增长）
+
+# 侧边栏宽度（可拖拽右边缘调整）
+SIDEBAR_MIN_W, SIDEBAR_MAX_W, SIDEBAR_DEF_W = 180, 360, 204
+SIDEBAR_HANDLE_W = 8  # 拖拽热区宽度（压在侧边栏右缘，不可见，仅切换光标）
+
+
+class SidebarResizer(QWidget):
+    """侧边栏右缘拖拽条：纯功能入口，拖动改变侧边栏宽度。
+
+    做成覆盖条而不是放进布局，避免改动原有 16px 外边距体系与卡片间距。
+    """
+
+    def __init__(self, page: "LibraryPage", parent=None) -> None:
+        super().__init__(parent)
+        self._page = page
+        self._start_x = 0.0
+        self._start_w = 0
+        self.setFixedWidth(SIDEBAR_HANDLE_W)
+        self.setCursor(Qt.CursorShape.SizeHorCursor)
+        self.setToolTip("拖动调整侧边栏宽度")
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._start_x = event.globalPosition().x()
+            self._start_w = self._page.sidebar.width()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            self._page.set_sidebar_width(int(self._start_w + event.globalPosition().x() - self._start_x))
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._page.save_sidebar_width()  # 松手才落盘，拖动过程不写配置
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
 
 # ---------- 后台数据线程 ----------
 class DataThread(QThread):
@@ -65,18 +115,23 @@ class DataThread(QThread):
 
     def run(self) -> None:
         try:
-            self.result.emit(("ok", self.fn()))
+            payload = ("ok", self.fn())
         except Exception as exc:  # noqa: BLE001
-            self.result.emit(("err", str(exc)))
+            payload = ("err", str(exc))
+        if self.isInterruptionRequested():
+            return  # 正在退出：丢弃结果，避免回写已销毁的界面
+        self.result.emit(payload)
 
 
 # ---------- 侧边栏导航项 ----------
-class NavItem(QAbstractButton):
+class NavItem(MotionButton):
     def __init__(self, icon_name: str, text: str, parent=None) -> None:
         super().__init__(parent)
         self.icon_name = icon_name
         self._label = text
         self.active = False
+        self.SCALE_ON_PRESS = 1.0  # 整行导航不缩放（缩放会显得怪），只做悬浮渐变
+        self._icon_pix = None
         self.setFixedHeight(38)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -89,22 +144,29 @@ class NavItem(QAbstractButton):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         r = self.rect().adjusted(2, 2, -2, -2)
+        hv = self.hover_t()
         if self.active:
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QColor(pal["press"]))
             p.drawRoundedRect(QRect(r), 10, 10)
-        elif self.underMouse():
+        elif hv > 0.01:
+            c = QColor(pal["primary_soft"])
+            c.setAlpha(int(c.alpha() * hv))
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor(pal["primary_soft"]))
+            p.setBrush(c)
             p.drawRoundedRect(QRect(r), 10, 10)
-        color = QColor(pal["primary_text"]) if self.active else QColor(pal["text_muted"])
-        ico = icons.pixmap(self.icon_name, color.name(), 16, stroke=1.8)
-        p.drawPixmap(r.left() + 8, r.top() + (r.height() - 16) // 2, ico)
+        color = mix(QColor(pal["text_muted"]), QColor(pal["primary_text"]), hv) \
+            if not self.active else QColor(pal["primary_text"])
+        key = (self.icon_name, color.name())
+        if self._icon_pix is None or self._icon_pix[0] != key:
+            self._icon_pix = (key, icons.pixmap(self.icon_name, color.name(), 16, stroke=1.8))
+        p.drawPixmap(r.left() + 8, r.top() + (r.height() - 16) // 2, self._icon_pix[1])
         f = QFont("Microsoft YaHei UI")
         f.setPointSizeF(9.5)
         f.setWeight(QFont.Weight.Medium if self.active else QFont.Weight.Normal)
         p.setFont(f)
-        p.setPen(QColor(pal["text"]) if self.active else QColor(pal["text_muted"]))
+        p.setPen(QColor(pal["text"]) if self.active
+                 else mix(QColor(pal["text_muted"]), QColor(pal["text"]), hv))
         p.drawText(QRect(r.left() + 32, r.top(), r.width() - 40, r.height()),
                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self._label)
 
@@ -164,12 +226,22 @@ class SongHeader(QWidget):
         info.addStretch(1)
         h.addLayout(info, 1)
         self._cover_id = ""
+        self._local_cover = False  # 当前显示的是否为本地自定义封面
 
     def set_data(self, title: str, meta: str, cover_id: str = "") -> None:
         self.title.setText(title)
         self.meta.setText(meta)
         self._cover_id = cover_id
+        self._local_cover = False
         self.cover.set_pixmap(None)
+
+    def set_local_cover(self, pix) -> None:
+        """显示本地自定义封面并标记，后续服务器封面 loaded 事件不再覆盖。"""
+        self._local_cover = True
+        self.cover.set_pixmap(pix)
+
+    def is_local_cover(self) -> bool:
+        return self._local_cover
 
     def current_cover_id(self) -> str:
         return self._cover_id
@@ -269,12 +341,18 @@ def _apply_sort(songs: list, col: int, mode: int) -> list:
 
 # ---------- 迷你歌词条 ----------
 class MiniLyrics(QWidget):
-    """播放栏上方当前歌词：背景由不透明渐变到半透明。"""
+    """播放栏上方当前歌词：背景由不透明渐变到半透明。
+
+    歌词条**有意覆盖在内容区底部之上**（向上渐隐、与列表自然融合），因此这里用
+    `WA_TransparentForMouseEvents` 让鼠标事件穿透到下层列表——既保留覆盖与渐变观感，
+    又不吞掉列表最后一行的悬浮/点击。
+    """
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._text = ""
         self.setFixedHeight(46)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
     def set_text(self, text: str) -> None:
         text = text or ""
@@ -327,8 +405,16 @@ class LibraryPage(QWidget):
         self.artist_songs: list[Song] = []
         self._base_artist_songs: list[Song] = []
         self.active_playlist_id: str = ""
-        self._play_after_load: bool = False        # 双击歌单后待自动播放
+        self._play_after_pid: str = ""              # 双击歌单后待自动播放的目标歌单 id
         self._playlist_cache: dict[str, list] = {}  # 本次运行已加载的歌单缓存（key=playlist_id）
+        # 视图意图令牌：快速切换导航（收藏/最近播放/专辑/歌手）时，先发的慢请求若晚到，
+        # 令牌已变则丢弃其结果，避免旧数据把界面切回去、导航与内容不一致
+        self._view_token: int = 0
+        # 搜索状态
+        self._nav_active: NavItem | None = None      # 当前高亮的导航项（搜索退出时据此恢复）
+        self._search_active: bool = False
+        self._search_query: str = ""
+        self._search_prev_nav: NavItem | None = None
         self._restore_pending: bool = False        # 启动后待恢复上次歌曲
         self._now_cover_id: str = ""
         # 歌单自定义封面：{playlist_id: {"mode": "auto"/"custom", "path": str}}
@@ -343,10 +429,45 @@ class LibraryPage(QWidget):
         self._anim_timer = QTimer(self)
         self._anim_timer.setInterval(90)
         self._anim_timer.timeout.connect(self._anim_tick)
+        # 封面预取分片计时器（避免同步磁盘读取阻塞 UI）
+        self._cover_prefetch_queue: list[str] = []
+        self._cover_prefetch_timer = QTimer(self)
+        self._cover_prefetch_timer.setInterval(0)
+        self._cover_prefetch_timer.timeout.connect(self._prefetch_cover_chunk)
+        # 封面加载后的重绘合并（每轮事件循环至多重绘一次）
+        self._cover_repaint_pending = False
+        self._cover_repaint_timer = QTimer(self)
+        self._cover_repaint_timer.setSingleShot(True)
+        self._cover_repaint_timer.setInterval(0)
+        self._cover_repaint_timer.timeout.connect(self._flush_cover_repaint)
+        # 侧边栏宽度（可拖拽右边缘调整、记忆到 config）
+        try:
+            self._sidebar_w = int(self.config.player.get("sidebar_width", SIDEBAR_DEF_W))
+        except (TypeError, ValueError):
+            self._sidebar_w = SIDEBAR_DEF_W
+        self._sidebar_w = max(SIDEBAR_MIN_W, min(SIDEBAR_MAX_W, self._sidebar_w))
         self._build()
         self._wire()
         self._apply_cover_overrides()
+        # 启动预载上次歌单头部封面：不等歌单列表加载完，直接显示（自定义优先，否则磁盘缓存服务器封面）
+        self._preload_header_cover()
         self.refresh_playlists()
+
+    def _preload_header_cover(self) -> None:
+        """按 config 的上次歌单信息提前设置头部大图，避免「歌单页没加载好阻塞封面」。"""
+        pid = self.config.player.get("last_playlist_id", "")
+        if not pid:
+            return
+        opix = self._get_override_pixmap(pid, 192)
+        if opix is not None:
+            self.song_header.set_local_cover(opix)
+            return
+        cid = self.config.player.get("last_playlist_cover_id", "")
+        if cid:
+            pix = self.covers.get(cid, 200)
+            if pix:
+                self.song_header.cover.set_pixmap(pix)
+                self.song_header._cover_id = cid
 
     # ---------- 构建 ----------
     def _build(self) -> None:
@@ -361,11 +482,31 @@ class LibraryPage(QWidget):
 
         # ---- 侧边栏 ----
         sidebar = NeuFrame(self, radius=18)
-        sidebar.setFixedWidth(204)
+        sidebar.setFixedWidth(self._sidebar_w)
         self.sidebar = sidebar
         sv = QVBoxLayout(sidebar)
         sv.setContentsMargins(16, 12, 16, 14)
         sv.setSpacing(2)
+
+        # 搜索框（侧边栏顶部）：Ctrl+F 聚焦；回车/防抖自动搜索；Esc 或清空退出搜索
+        self.search_box = NeuLineEdit("", "搜索歌曲 (Ctrl+F)")
+        self.search_box.setFixedHeight(36)
+        self.search_box.setClearButtonEnabled(True)
+        self.search_box.setTextMargins(26, 0, 24, 0)  # 给左侧搜索图标与右侧清除按钮留位
+        self._search_icon = self.search_box.addAction(
+            icons.icon("search", theme.CURRENT["text_muted"], 15, stroke=2.0),
+            QLineEdit.ActionPosition.LeadingPosition,
+        )
+        self._search_icon.setToolTip("搜索")
+        self._search_icon.triggered.connect(lambda: self._run_search(force=True))
+        self._search_debounce = QTimer(self)
+        self._search_debounce.setSingleShot(True)
+        self._search_debounce.setInterval(300)  # 输入停顿 300ms 再发请求，避免逐字搜索
+        self._search_debounce.timeout.connect(self._run_search)
+        self.search_box.textChanged.connect(self._on_search_text)
+        self.search_box.returnPressed.connect(lambda: self._run_search(force=True))
+        sv.addWidget(self.search_box)
+        sv.addSpacing(8)
 
         self.nav_home = NavItem("home", "首页")
         sv.addWidget(self.nav_home)
@@ -378,13 +519,29 @@ class LibraryPage(QWidget):
         sv.addWidget(self.nav_artist)
         sv.addWidget(self.nav_album)
         sv.addSpacing(10)
-        sv.addWidget(self._section_label("我的歌单"))
+        pl_header = QWidget()
+        plh = QHBoxLayout(pl_header)
+        plh.setContentsMargins(0, 0, 0, 0)
+        plh.setSpacing(0)
+        plh.addWidget(self._section_label("我的歌单"), 1)
+        btn_reload_pl = NeuIconButton("refresh", px=13)
+        btn_reload_pl.setFixedSize(22, 22)
+        btn_reload_pl.setToolTip("重新加载歌单列表")
+        btn_reload_pl.clicked.connect(lambda: self.refresh_playlists(preserve_current=True))
+        plh.addWidget(btn_reload_pl)
+        sv.addWidget(pl_header)
 
         self._pl_model = SimpleModel()
         self._pl_delegate = PlaylistDelegate(self.covers)
         self._pl_view = make_list_view(self._pl_model, self._pl_delegate)
         sv.addWidget(self._pl_view, 1)
         content.addWidget(sidebar)
+        # 侧边栏右缘拖拽条（覆盖条，不占布局；位置由 _layout_sidebar_handle 跟随侧边栏）
+        self._sb_resizer = SidebarResizer(self, self)
+        self._sb_resizer.raise_()
+
+        # A2：列表上下缘渐隐（有内容超出时提示还能滚动），鼠标穿透
+        self._pl_fade = ListEdgeFade(self._pl_view, self._pl_view)
 
         # ---- 主内容区（多视图堆叠） ----
         self.content_stack = QStackedWidget()
@@ -408,6 +565,7 @@ class LibraryPage(QWidget):
         self.song_view.setSpacing(2)
         self.song_view.doubleClicked.connect(self._on_song_double_clicked)
         self.song_view.viewport().installEventFilter(self)
+        self._song_fade = ListEdgeFade(self.song_view, self.song_view)
         vs.addWidget(self.song_view, 1)
         self.content_stack.addWidget(view_song)
 
@@ -503,6 +661,8 @@ class LibraryPage(QWidget):
         # 迷你歌词：叠加在内容区之上、播放栏之上，顶部渐变透明与 UI 重叠
         self.mini_lyrics = MiniLyrics(self)
         self.mini_lyrics.raise_()
+        # B2：视图切换时「从底色淡入」（只画一层底色，不用离屏渲染）
+        self._veil = FadeVeil(self)
 
     def _section_label(self, text: str, center: bool = True) -> QLabel:
         lb = QLabel(text)
@@ -522,7 +682,8 @@ class LibraryPage(QWidget):
         bar = NeuFrame(self, radius=18)
         bar.setFixedHeight(140)
         b = QVBoxLayout(bar)
-        b.setContentsMargins(18, 14, 18, 18)
+        # 内边距对齐 8px 栅格（DESIGN.md spacing.base）；左 = 下 = 16，保证封面左右下留白一致
+        b.setContentsMargins(16, 16, 16, 16)
         b.setSpacing(4)
 
         row1 = QHBoxLayout()
@@ -539,6 +700,9 @@ class LibraryPage(QWidget):
         row1.addWidget(self.progress, 1)
         row1.addWidget(self.time_tot)
         b.addLayout(row1)
+        # 弹性间距吸收余量：让控制行（含封面）紧贴下内边距，
+        # 从而封面「左留白 == 下留白」都等于 16px
+        b.addStretch(1)
 
         # 控制行：左/右等宽拉伸，中间控制真居中
         row2 = QHBoxLayout()
@@ -547,13 +711,14 @@ class LibraryPage(QWidget):
         left = QWidget()
         ll = QHBoxLayout(left)
         ll.setContentsMargins(0, 0, 0, 0)
-        ll.setSpacing(8)
+        ll.setSpacing(12)  # sm：封面与文字间距（DESIGN.md spacing.sm）
         self.cover = CoverArt(radius=12)
         self.cover.setFixedSize(76, 76)
         self.cover.clicked.connect(lambda: self._emit_open_immersive())
         ll.addWidget(self.cover)
         info = QVBoxLayout()
-        info.setSpacing(0)
+        info.setSpacing(4)  # xs：歌名与歌手间距（DESIGN.md spacing.xs）
+        info.addStretch(1)  # 文字块在封面高度内垂直居中（24+4+20=48 vs 封面 76）
         title_row = QHBoxLayout()
         title_row.setSpacing(6)
         self.like_btn = NeuIconButton("heart", px=15)
@@ -563,22 +728,25 @@ class LibraryPage(QWidget):
         title_row.addWidget(self.like_btn)
         self.now_title = MarqueeLabel()
         ft = QFont("Microsoft YaHei UI")
-        ft.setPointSizeF(10)
+        ft.setPointSizeF(12)  # = 16px，DESIGN.md body-md
         ft.setWeight(QFont.Weight.Medium)
         self.now_title.setFont(ft)
+        self.now_title.setFixedHeight(24)  # body-md lineHeight
         self.now_title.setMinimumWidth(120)
         title_row.addWidget(self.now_title, 1)
         info.addLayout(title_row)
         self.now_artist = MarqueeLabel()
         fa = QFont("Microsoft YaHei UI")
-        fa.setPointSizeF(8.5)
+        fa.setPointSizeF(10.5)  # = 14px，DESIGN.md label-md
         self.now_artist.setFont(fa)
+        self.now_artist.setFixedHeight(20)  # label-md lineHeight
         self.now_artist.set_color(theme.CURRENT["text_muted"])
         self.now_artist.setMinimumWidth(120)
         self.now_artist.setCursor(Qt.CursorShape.PointingHandCursor)
         self.now_artist.setToolTip("点击查看歌手")
         self.now_artist.clicked.connect(self._open_now_artist)
         info.addWidget(self.now_artist)
+        info.addStretch(1)
         ll.addLayout(info, 1)
         row2.addWidget(left, 1)
 
@@ -642,25 +810,57 @@ class LibraryPage(QWidget):
         self.progress.hoverEnded.connect(self._restore_time)
         self.covers.loaded.connect(self._on_cover_loaded)
         self.lyrics.loaded.connect(self._on_lyrics_loaded)
+        # 搜索框内按 Esc：清空并退出搜索，回到搜索前的页面
+        esc = QShortcut(QKeySequence(Qt.Key.Key_Escape), self.search_box)
+        esc.setContext(Qt.ShortcutContext.WidgetShortcut)
+        esc.activated.connect(self._exit_search)
 
     def _restore_time(self) -> None:
         self.time_cur.setText(_fmt_ms(self.player.media.position()))
 
     def _on_cover_loaded(self, cover_id: str, pix) -> None:
-        self.song_view.viewport().update()
-        self.artist_song_view.viewport().update()
-        self.album_view.viewport().update()
-        self.artist_view.viewport().update()
-        self._pl_view.viewport().update()
-        if cover_id == self.song_header.current_cover_id():
+        # 每张封面加载完成都立刻重绘 5 个视图代价过高（打开 200 首歌单 ≈ 上千次整视口重绘），
+        # 这里合并为「每轮事件循环至多重绘一次」
+        if not self._cover_repaint_pending:
+            self._cover_repaint_pending = True
+            self._cover_repaint_timer.start()
+        # 本地自定义封面已显示时不覆盖
+        if cover_id == self.song_header.current_cover_id() and not self.song_header.is_local_cover():
             self.song_header.cover.set_pixmap(pix)
         if cover_id == self.artist_header.current_cover_id():
             self.artist_header.cover.set_pixmap(pix)
         if cover_id == self._now_cover_id:
             self.cover.set_pixmap(pix)
 
+    def _flush_cover_repaint(self) -> None:
+        self._cover_repaint_pending = False
+        self.song_view.viewport().update()
+        self.artist_song_view.viewport().update()
+        self.album_view.viewport().update()
+        self.artist_view.viewport().update()
+        self._pl_view.viewport().update()
+
+    def _queue_cover_prefetch(self, cover_ids: list) -> None:
+        self._cover_prefetch_queue = list(cover_ids)
+        if self._cover_prefetch_queue:
+            self._cover_prefetch_timer.start()
+
+    def _prefetch_cover_chunk(self) -> None:
+        """每轮只取少量封面，避免同步磁盘读取把 UI 线程堵住。"""
+        for _ in range(8):
+            if not self._cover_prefetch_queue:
+                self._cover_prefetch_timer.stop()
+                return
+            cid = self._cover_prefetch_queue.pop(0)
+            if cid:
+                self.covers.get(cid, 200)
+
     # ---------- 歌词 ----------
     def _on_lyrics_loaded(self, song_id: str, lines) -> None:
+        # 快速切歌时旧线程的结果可能晚到：只接受当前播放歌曲的歌词
+        cur = self._current_song()
+        if cur is None or cur.id != song_id:
+            return
         self._lyric_lines = lines
 
     def _update_mini_lyrics(self) -> None:
@@ -684,27 +884,56 @@ class LibraryPage(QWidget):
         self.mini_lyrics.set_text(current)
 
     # ---------- 歌单 ----------
-    def refresh_playlists(self) -> None:
+    def set_client(self, client) -> None:
+        """重新连接后更新客户端引用并复位本次运行的歌单缓存（不重建 UI、不改样式）。"""
+        self.client = client
+        self._playlist_cache.clear()  # 防止旧服务器/旧状态的歌单内容命中缓存
+
+    def _cache_playlist(self, playlist_id: str, songs: list) -> None:
+        """写入歌单缓存并做容量上限（防长期浏览大量歌单后内存单调增长）。"""
+        self._playlist_cache[playlist_id] = list(songs)
+        while len(self._playlist_cache) > MAX_PLAYLIST_CACHE:
+            oldest = next(iter(self._playlist_cache))
+            if oldest == self.active_playlist_id:
+                break  # 正在看的歌单不淘汰
+            self._playlist_cache.pop(oldest, None)
+
+    def refresh_playlists(self, preserve_current: bool = False, reload_songs: bool = False) -> None:
+        """重新拉取服务器歌单列表刷新侧边栏。
+
+        preserve_current=True 时刷新后仍停留在当前歌单；
+        reload_songs=True 时顺带强制重载当前歌单歌曲（「重新加载」按钮用，避免二次加载）。
+        """
         t = DataThread(self.client.get_playlists, self)
-        t.result.connect(self._on_playlists_loaded)
+        t.result.connect(lambda payload, pc=preserve_current, rs=reload_songs:
+                         self._on_playlists_loaded(payload, pc, rs))
         t.finished.connect(lambda: self._clean_thread(t))
         self._threads.append(t)
         t.start()
 
-    def _on_playlists_loaded(self, payload) -> None:
+    def _on_playlists_loaded(self, payload, preserve_current: bool = False, reload_songs: bool = False) -> None:
         kind, data = payload
         if kind != "ok":
             return
+        # 「我喜欢」歌单置顶（按名称匹配），其余保持服务器返回顺序
+        like = [p for p in data if (p.name or "").strip() == "我喜欢"]
+        rest = [p for p in data if (p.name or "").strip() != "我喜欢"]
+        data = like + rest
         self.playlists = data
         items = [(p.id, p.name, int(p.song_count or 0), p.cover_id) for p in data]
         self._pl_model.set_items(items)
+        # 预取歌单封面（200px）——分片进行，避免几十上百个封面同步读磁盘阻塞 UI 线程
+        self._queue_cover_prefetch([p.cover_id for p in data if p.cover_id])
         if data:
             # 默认打开上次的歌单（若无则第一个），并准备恢复上次歌曲
-            target = self.config.player.get("last_playlist_id", "") or data[0].id
-            if not any(p.id == target for p in data):
-                target = data[0].id
-            self._restore_pending = True
-            self.load_playlist(target)
+            if preserve_current and self.active_playlist_id and any(p.id == self.active_playlist_id for p in data):
+                target = self.active_playlist_id  # 手动刷新：停留在当前打开的歌单
+            else:
+                target = self.config.player.get("last_playlist_id", "") or data[0].id
+                if not any(p.id == target for p in data):
+                    target = data[0].id
+                self._restore_pending = True  # 仅启动/重新连接场景标记恢复
+            self.load_playlist(target, force=reload_songs)
         else:
             self._show_placeholder("服务器上没有歌单，请先在飞牛音乐中添加")
         # 后台补充真实歌曲数（部分服务端 getPlaylists 不带 songCount）
@@ -727,9 +956,15 @@ class LibraryPage(QWidget):
             if int(it[2] or 0) != real:
                 self._pl_model.update_item(row, (it[0], it[1], real, it[3]))
 
-    def load_playlist(self, playlist_id: str, force: bool = False) -> None:
+    def load_playlist(self, playlist_id: str, force: bool = False, play_after: bool = False) -> None:
         """加载歌单：立即显示「加载中」；命中缓存则瞬时填充，否则两段式加载——
-        第一段快速取前 50 首立即可用，第二段后台拉全量后替换，提高打开反应速度。"""
+        第一段快速取前 50 首立即可用，第二段后台拉全量后替换，提高打开反应速度。
+
+        play_after 仅由双击歌单传入：表示这一趟加载完成后自动「播放全部」。
+        每次加载都会重设该意图，因此加载失败或用户改用单击都不会残留（避免单击却自动开播）。
+        """
+        self._play_after_pid = playlist_id if play_after else ""
+        self._new_view_token()  # 切歌单也换视图，令导航等其他请求的迟到结果失效
         self.active_playlist_id = playlist_id
         self._pl_delegate.set_current(playlist_id)
         self._pl_view.viewport().update()
@@ -742,12 +977,12 @@ class LibraryPage(QWidget):
             return
         # 第一段：快速前 50（不触发 Jellyfin 补全，秒回）
         t = DataThread(lambda: self.client.get_playlist_songs(playlist_id, jellyfin=False), self)
-        t.result.connect(lambda payload, pip=playlist_id, ppl=pl: self._on_fast_result(payload, pip, ppl))
+        t.result.connect(lambda payload, pip=playlist_id, ppl=pl, f=force: self._on_fast_result(payload, pip, ppl, f))
         t.finished.connect(lambda: self._clean_thread(t))
         self._threads.append(t)
         t.start()
 
-    def _on_fast_result(self, payload, playlist_id: str, pl) -> None:
+    def _on_fast_result(self, payload, playlist_id: str, pl, force: bool = False) -> None:
         """快速段完成：立即填充前 50 首，随后启动全量加载。"""
         kind, data = payload
         if kind != "ok" or not data:
@@ -755,11 +990,15 @@ class LibraryPage(QWidget):
         if playlist_id != self.active_playlist_id:
             return
         total = int(getattr(pl, "song_count", 0) or 0) if pl else 0
-        full_now = bool(total > 0 and len(data) >= total) or playlist_id in self._playlist_cache
+        # force=True（用户点「重新加载」）时必须继续跑全量，不能因为旧缓存就直接收尾，
+        # 否则刷新按钮拿不到服务器最新数据
+        full_now = (bool(total > 0 and len(data) >= total)
+                    or (not force and playlist_id in self._playlist_cache))
         self._show_playlist_songs(data, pl, fast=not full_now)
         if full_now:
             # 快速段本身就是全量（服务器支持分页 / 已有缓存）→ 直接收尾（_show_playlist_songs 已非 fast）
-            self._playlist_cache.setdefault(playlist_id, list(data))
+            if playlist_id not in self._playlist_cache:
+                self._cache_playlist(playlist_id, data)
             return
         # 第二段：全量（含 Jellyfin 补全）
         t2 = DataThread(lambda: self.client.get_playlist_songs(playlist_id), self)
@@ -772,7 +1011,7 @@ class LibraryPage(QWidget):
         kind, data = payload
         if kind != "ok" or not data:
             return
-        self._playlist_cache[playlist_id] = list(data)
+        self._cache_playlist(playlist_id, data)
         if playlist_id != self.active_playlist_id:
             return
         if len(data) > (self.song_model.rowCount() if hasattr(self, "song_model") else 0):
@@ -799,11 +1038,14 @@ class LibraryPage(QWidget):
             if not cover_id and data and data[0].cover_id:
                 cover_id = data[0].cover_id
                 self._update_playlist_cover(pl.id, cover_id)
-            self._show_songs(data, pl.name, meta, cover_id)
-            # 歌单自定义封面优先
+            # 歌单自定义封面优先：有本地图则直接显示本地图，不再显示服务器封面（避免先闪服务器封面）
             opix = self._get_override_pixmap(pl.id, 192)
             if opix is not None:
-                self.song_header.cover.set_pixmap(opix)
+                self._show_songs(data, pl.name, meta, "")
+                self.song_header._cover_id = cover_id  # 保留真实 cover_id，供关闭时保存
+                self.song_header.set_local_cover(opix)
+            else:
+                self._show_songs(data, pl.name, meta, cover_id)
         else:
             self._show_songs(data, "歌单", f"{len(data)} 首", "")
         # 快速段（前 50）不触发播放/恢复，等全量段完成后统一收尾
@@ -813,11 +1055,15 @@ class LibraryPage(QWidget):
 
     def _finalize_load(self) -> None:
         """全量歌单就绪后的统一收尾：双击自动播放全部 + 启动恢复上次歌曲。"""
-        # 双击歌单 → 加载完成后直接开始播放全部
-        if self._play_after_load:
-            self._play_after_load = False
-            if self.current_songs:
-                self._play_all()
+        # 双击歌单 → 加载完成后直接开始播放全部（只对当时双击的那个歌单生效：
+        # 若期间用户又单击了别的歌单 / 加载失败，意图作废，避免“单击却自动开播”）
+        if self._play_after_pid:
+            if self._play_after_pid == self.active_playlist_id:
+                self._play_after_pid = ""
+                if self.current_songs:
+                    self._play_all()
+            else:
+                self._play_after_pid = ""
         # 启动恢复：首次歌单加载完成后显示上次歌曲
         self._maybe_restore()
 
@@ -831,7 +1077,7 @@ class LibraryPage(QWidget):
             return
         song = next((s for s in self.current_songs if s.id == sid), None)
         if song:
-            self.player.restore(song, int(self.config.player.get("last_position", 0) or 0))
+            self.player.restore(self.current_songs, song, int(self.config.player.get("last_position", 0) or 0))
 
     def _show_loading(self, title: str, cover_id: str = "") -> None:
         """跳转到歌单页并显示“正在加载…”，随后由加载结果替换为真实内容。"""
@@ -844,16 +1090,21 @@ class LibraryPage(QWidget):
         # 歌单自定义封面优先
         opix = self._get_override_pixmap(self.active_playlist_id, 192)
         if opix is not None:
-            self.song_header.cover.set_pixmap(opix)
+            self.song_header.set_local_cover(opix)
         elif cover_id:
             pix = self.covers.get(cover_id, 200)
             if pix:
                 self.song_header.cover.set_pixmap(pix)
 
     def _reload_playlist(self) -> None:
-        """随机播放旁刷新按钮：强制重新加载当前歌单。"""
-        if self.active_playlist_id:
-            self.load_playlist(self.active_playlist_id, force=True)
+        """随机播放旁刷新按钮：强制重新加载当前歌单，并同步刷新侧边栏歌单列表。"""
+        if self._search_active:
+            self._run_search(force=True)  # 搜索结果页的刷新 = 重搜当前关键词
+            return
+        # 服务器上新增/删除歌单后，仅重载歌曲看不到变化 → 先刷新侧边栏歌单列表（保留当前歌单），
+        # 并让同一次刷新顺带强制重载当前歌单歌曲（reload_songs=True）——避免这里再调一次
+        # load_playlist 造成同一歌单并发跑两套「快取+全量」请求
+        self.refresh_playlists(preserve_current=True, reload_songs=True)
 
     # ---------- 歌单自定义封面 ----------
     def _path_to_pixmap(self, path: str, size: int = 200) -> QPixmap | None:
@@ -975,8 +1226,9 @@ class LibraryPage(QWidget):
     def show_albums(self) -> None:
         self._set_nav_active(self.nav_album)
         self._album_back_show(False)
+        token = self._new_view_token()
         t = DataThread(lambda: self.client.get_albums("newest", 200), self)
-        t.result.connect(self._on_albums_loaded)
+        t.result.connect(lambda payload, tk=token: self._on_albums_loaded(payload, tk))
         t.finished.connect(lambda: self._clean_thread(t))
         self._threads.append(t)
         t.start()
@@ -984,18 +1236,23 @@ class LibraryPage(QWidget):
     def show_recent_albums(self) -> None:
         self._set_nav_active(self.nav_home)
         self._album_back_show(False)
+        token = self._new_view_token()
         t = DataThread(lambda: self.client.get_albums("newest", 60), self)
-        t.result.connect(self._on_recent_albums_loaded)
+        t.result.connect(lambda payload, tk=token: self._on_recent_albums_loaded(payload, tk))
         t.finished.connect(lambda: self._clean_thread(t))
         self._threads.append(t)
         t.start()
 
-    def _on_albums_loaded(self, payload) -> None:
+    def _on_albums_loaded(self, payload, token: int) -> None:
+        if token != self._view_token:
+            return  # 用户已切到别的视图，丢弃迟到结果
         kind, data = payload
         if kind == "ok":
             self._show_albums(data, "专辑")
 
-    def _on_recent_albums_loaded(self, payload) -> None:
+    def _on_recent_albums_loaded(self, payload, token: int) -> None:
+        if token != self._view_token:
+            return
         kind, data = payload
         if kind == "ok":
             self._show_albums(data, "最近专辑")
@@ -1003,13 +1260,16 @@ class LibraryPage(QWidget):
     def _on_album_clicked(self, index: QModelIndex) -> None:
         album = self.album_model.data(index, Qt.ItemDataRole.UserRole)
         if album:
+            token = self._new_view_token()
             t = DataThread(lambda: self.client.get_album(album.id), self)
-            t.result.connect(lambda payload, a=album: self._on_album_songs(payload, a))
+            t.result.connect(lambda payload, a=album, tk=token: self._on_album_songs(payload, a, tk))
             t.finished.connect(lambda: self._clean_thread(t))
             self._threads.append(t)
             t.start()
 
-    def _on_album_songs(self, payload, album: Album) -> None:
+    def _on_album_songs(self, payload, album: Album, token: int) -> None:
+        if token != self._view_token:
+            return
         kind, data = payload
         if kind != "ok":
             return
@@ -1018,13 +1278,17 @@ class LibraryPage(QWidget):
 
     def open_album(self, album_id: str, album_name: str, artist: str = "", cover_id: str = "") -> None:
         """从歌曲行点击专辑名：跳到专辑并展示其歌曲。"""
+        token = self._new_view_token()
         t = DataThread(lambda: self.client.get_album(album_id), self)
-        t.result.connect(lambda payload, an=album_name, ar=artist, cid=cover_id: self._on_album_songs_id(payload, an, ar, cid))
+        t.result.connect(lambda payload, an=album_name, ar=artist, cid=cover_id, tk=token:
+                         self._on_album_songs_id(payload, an, ar, cid, tk))
         t.finished.connect(lambda: self._clean_thread(t))
         self._threads.append(t)
         t.start()
 
-    def _on_album_songs_id(self, payload, album_name: str, artist: str, cover_id: str) -> None:
+    def _on_album_songs_id(self, payload, album_name: str, artist: str, cover_id: str, token: int) -> None:
+        if token != self._view_token:
+            return
         kind, data = payload
         if kind != "ok":
             return
@@ -1043,13 +1307,16 @@ class LibraryPage(QWidget):
             self._select_artist_and_load(artist_id, artist_name)
         else:
             # 左侧歌手列表未加载 → 先加载列表再定位
+            token = self._new_view_token()
             t = DataThread(self.client.get_artists, self)
-            t.result.connect(self._on_artists_loaded_for_jump)
+            t.result.connect(lambda payload, tk=token: self._on_artists_loaded_for_jump(payload, tk))
             t.finished.connect(lambda: self._clean_thread(t))
             self._threads.append(t)
             t.start()
 
-    def _on_artists_loaded_for_jump(self, payload) -> None:
+    def _on_artists_loaded_for_jump(self, payload, token: int) -> None:
+        if token != self._view_token:
+            return
         kind, data = payload
         if kind != "ok":
             return
@@ -1064,6 +1331,7 @@ class LibraryPage(QWidget):
 
     def _select_artist_and_load(self, artist_id: str, artist_name: str) -> None:
         """在左侧列表中定位/选中歌手，并加载其歌曲到右侧。"""
+        token = self._new_view_token()
         artist = next((a for a in self.artist_model._items if a.id == artist_id), None)
         if artist is None:
             artist = Artist(id=artist_id, name=artist_name)
@@ -1077,7 +1345,7 @@ class LibraryPage(QWidget):
         self.artist_header.set_data(artist.name, "正在加载…", "")
         self.artist_song_model.set_songs([])
         t = DataThread(lambda: self.client.get_artist_songs(artist.id), self)
-        t.result.connect(lambda payload, a=artist: self._on_artist_songs(payload, a))
+        t.result.connect(lambda payload, a=artist, tk=token: self._on_artist_songs(payload, a, tk))
         t.finished.connect(lambda: self._clean_thread(t))
         self._threads.append(t)
         t.start()
@@ -1086,13 +1354,16 @@ class LibraryPage(QWidget):
     def show_artists(self) -> None:
         self._set_nav_active(self.nav_artist)
         self._album_back_show(False)
+        token = self._new_view_token()
         t = DataThread(self.client.get_artists, self)
-        t.result.connect(self._on_artists_loaded)
+        t.result.connect(lambda payload, tk=token: self._on_artists_loaded(payload, tk))
         t.finished.connect(lambda: self._clean_thread(t))
         self._threads.append(t)
         t.start()
 
-    def _on_artists_loaded(self, payload) -> None:
+    def _on_artists_loaded(self, payload, token: int) -> None:
+        if token != self._view_token:
+            return
         kind, data = payload
         if kind != "ok":
             return
@@ -1122,17 +1393,20 @@ class LibraryPage(QWidget):
     def _on_artist_clicked(self, index: QModelIndex) -> None:
         artist = self.artist_model.data(index, Qt.ItemDataRole.UserRole)
         if artist:
+            token = self._new_view_token()
             self.artist_delegate.set_current(artist.id)
             self.artist_view.viewport().update()
             self.artist_header.set_data(artist.name, f"正在加载…", "")
             self.artist_song_model.set_songs([])
             t = DataThread(lambda: self.client.get_artist_songs(artist.id), self)
-            t.result.connect(lambda payload, a=artist: self._on_artist_songs(payload, a))
+            t.result.connect(lambda payload, a=artist, tk=token: self._on_artist_songs(payload, a, tk))
             t.finished.connect(lambda: self._clean_thread(t))
             self._threads.append(t)
             t.start()
 
-    def _on_artist_songs(self, payload, artist: Artist) -> None:
+    def _on_artist_songs(self, payload, artist: Artist, token: int) -> None:
+        if token != self._view_token:
+            return  # 用户已切到别的歌手/视图，丢弃迟到结果（否则右侧内容与左侧选中项不一致）
         kind, data = payload
         if kind != "ok":
             self.artist_header.set_data(artist.name, "加载失败", "")
@@ -1172,16 +1446,117 @@ class LibraryPage(QWidget):
     def _album_back_show(self, on: bool) -> None:
         self.album_back.setVisible(on)
 
-    # ---------- 收藏 / 最近播放 / 搜索 ----------
-    def show_starred(self) -> None:
-        self._set_nav_active(self.nav_starred)
-        t = DataThread(self.client.get_starred, self)
-        t.result.connect(self._on_starred_loaded)
+    # ---------- 搜索 ----------
+    def focus_search(self) -> None:
+        """快捷键入口：聚焦搜索框并全选，方便直接改写关键词。"""
+        self.search_box.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        self.search_box.selectAll()
+
+    def _on_search_text(self, text: str) -> None:
+        if not (text or "").strip():
+            self._exit_search()  # 清空输入即退出搜索
+            return
+        self._search_debounce.start()
+
+    def _run_search(self, force: bool = False) -> None:
+        """执行搜索：结果复用歌曲列表视图展示。force=True 时同关键词也重新请求。"""
+        query = self.search_box.text().strip()
+        if not query:
+            self._exit_search()
+            return
+        if not force and self._search_active and query == self._search_query:
+            return  # 关键词未变且已有结果，避免重复请求
+        if not self._search_active:
+            self._search_active = True
+            self._search_prev_nav = self._nav_active  # 记住搜索前的导航，供 Esc 恢复
+        self._search_query = query
+        self._search_debounce.stop()
+        token = self._new_view_token()
+        # 立即给出「正在搜索」反馈
+        self.current_songs = []
+        self._base_songs = []
+        self.song_model.set_songs([])
+        self.song_header.set_data(f"搜索：{query}", "正在搜索…", "")
+        self.list_header.show()
+        self.content_stack.setCurrentIndex(_VIEW_SONG)
+        t = DataThread(lambda: self.client.search(query), self)
+        t.result.connect(lambda payload, tk=token, qq=query: self._on_search_loaded(payload, tk, qq))
         t.finished.connect(lambda: self._clean_thread(t))
         self._threads.append(t)
         t.start()
 
-    def _on_starred_loaded(self, payload) -> None:
+    def _on_search_loaded(self, payload, token: int, query: str) -> None:
+        # 双保险：令牌已变（用户切走）或关键词已被改写 → 丢弃结果
+        if token != self._view_token or self.search_box.text().strip() != query:
+            return
+        kind, data = payload
+        if kind != "ok":
+            self.song_header.set_data(f"搜索：{query}", "搜索失败", "")
+            self._show_placeholder(f"搜索失败：{data}")
+            return
+        songs, albums, artists = data
+        if songs:
+            extra = []
+            if albums:
+                extra.append(f"专辑 {len(albums)}")
+            if artists:
+                extra.append(f"歌手 {len(artists)}")
+            meta = f"{len(songs)} 首" + (" · " + " · ".join(extra) if extra else "")
+            self._show_songs(songs, f"搜索：{query}", meta)
+        else:
+            self._show_placeholder(f"未找到与「{query}」相关的歌曲")
+
+    def _exit_search(self) -> None:
+        """退出搜索并回到搜索前的页面（Esc / 清空输入 / 点击左侧图标）。"""
+        if not self._search_active:
+            return
+        nav = self._search_prev_nav
+        self._cancel_search_silently()
+        self._restore_nav_view(nav)
+
+    def _cancel_search_silently(self) -> None:
+        """静默清理搜索状态（不恢复视图，用于用户改点导航/歌单时）。"""
+        if not self._search_active:
+            return
+        self._search_active = False
+        self._search_query = ""
+        self._search_prev_nav = None
+        self._search_debounce.stop()
+        if self.search_box.text():
+            self.search_box.blockSignals(True)
+            self.search_box.clear()
+            self.search_box.blockSignals(False)
+
+    def _restore_nav_view(self, nav) -> None:
+        """按导航项恢复视图；无导航项时回到当前歌单。"""
+        if nav is self.nav_home:
+            self.show_recent_albums()
+        elif nav is self.nav_starred:
+            self.show_starred()
+        elif nav is self.nav_recent:
+            self.show_play_queue()
+        elif nav is self.nav_artist:
+            self.show_artists()
+        elif nav is self.nav_album:
+            self.show_albums()
+        elif self.active_playlist_id:
+            self.load_playlist(self.active_playlist_id)  # 命中缓存，瞬时恢复
+        else:
+            self.show_recent_albums()
+
+    # ---------- 收藏 / 最近播放 / 搜索 ----------
+    def show_starred(self) -> None:
+        self._set_nav_active(self.nav_starred)
+        token = self._new_view_token()
+        t = DataThread(self.client.get_starred, self)
+        t.result.connect(lambda payload, tk=token: self._on_starred_loaded(payload, tk))
+        t.finished.connect(lambda: self._clean_thread(t))
+        self._threads.append(t)
+        t.start()
+
+    def _on_starred_loaded(self, payload, token: int) -> None:
+        if token != self._view_token:
+            return  # 用户已切到别的视图，丢弃迟到结果
         kind, data = payload
         if kind != "ok":
             return
@@ -1192,13 +1567,16 @@ class LibraryPage(QWidget):
 
     def show_play_queue(self) -> None:
         self._set_nav_active(self.nav_recent)
+        token = self._new_view_token()
         t = DataThread(self.client.get_play_queue, self)
-        t.result.connect(self._on_play_queue_loaded)
+        t.result.connect(lambda payload, tk=token: self._on_play_queue_loaded(payload, tk))
         t.finished.connect(lambda: self._clean_thread(t))
         self._threads.append(t)
         t.start()
 
-    def _on_play_queue_loaded(self, payload) -> None:
+    def _on_play_queue_loaded(self, payload, token: int) -> None:
+        if token != self._view_token:
+            return
         kind, data = payload
         if kind != "ok":
             return
@@ -1217,11 +1595,28 @@ class LibraryPage(QWidget):
         self.artist_song_model.set_songs(self.artist_songs)
 
     # ---------- 通用展示 ----------
+    def _new_view_token(self) -> int:
+        """切换内容视图前调用：令牌自增，使仍在飞行中的旧请求结果失效。"""
+        self._view_token += 1
+        return self._view_token
+
+    def _play_view_fade(self) -> None:
+        """B2：视图切换时从底色淡入（只盖内容区，不遮标题栏与播放栏）。"""
+        if not hasattr(self, "_veil"):
+            return
+        rect = self.content_stack.geometry()
+        if rect.isValid() and not rect.isEmpty():
+            self._veil.play(rect, 130)
+
     def _show_songs(self, songs: list[Song], title: str, meta: str, cover_id: str = "") -> None:
+        self._new_view_token()
+        had_rows = self.song_model.rowCount() > 0
         self.current_songs = list(songs)
         self._base_songs = list(songs)
         self.list_header.reset()
         self.song_model.set_songs(self.current_songs)
+        if not had_rows:
+            self.song_delegate.begin_intro()  # B4：从空列表填充时才逐行入场，避免两段式加载重复动画
         self.song_header.set_data(title, meta, cover_id)
         if cover_id:
             pix = self.covers.get(cover_id, 200)
@@ -1229,21 +1624,70 @@ class LibraryPage(QWidget):
                 self.song_header.cover.set_pixmap(pix)
         self.list_header.show()
         self.content_stack.setCurrentIndex(_VIEW_SONG)
+        self._play_view_fade()
 
     def _show_albums(self, albums: list[Album], title: str) -> None:
+        self._new_view_token()
         self.album_model.set_items(list(albums))
         self.album_title.setText(title)
         self.content_stack.setCurrentIndex(_VIEW_ALBUM)
         # 页面切换后触发一次自适应网格（此时视图才有真实尺寸）
         QTimer.singleShot(0, self._resize_album_grid)
+        self._play_view_fade()
 
     def _show_placeholder(self, text: str) -> None:
+        self._new_view_token()
         self.placeholder_label.setText(text)
         self.content_stack.setCurrentIndex(_VIEW_PLACEHOLDER)
+        self._play_view_fade()
+
+    def set_sidebar_width(self, w: int) -> None:
+        """拖动侧边栏右缘：夹取范围后应用并复位拖拽条位置。"""
+        w = max(SIDEBAR_MIN_W, min(SIDEBAR_MAX_W, int(w)))
+        if w == self._sidebar_w:
+            return
+        self._sidebar_w = w
+        self.sidebar.setFixedWidth(w)
+        lay = self.layout()
+        if lay is not None:
+            lay.activate()  # 立即重排，便于马上按新几何摆放拖拽条
+        self._layout_sidebar_handle()
+
+    def save_sidebar_width(self) -> None:
+        """松手才落盘（启动时从 config 恢复）。"""
+        if int(self.config.player.get("sidebar_width", 0) or 0) == self._sidebar_w:
+            return
+        self.config.player["sidebar_width"] = self._sidebar_w
+        self.config.save()
+
+    def _layout_sidebar_handle(self) -> None:
+        """把拖拽条压在侧边栏右缘（宽度变化 / 页面缩放后都要复位）。"""
+        sb = getattr(self, "sidebar", None)
+        hd = getattr(self, "_sb_resizer", None)
+        if sb is None or hd is None:
+            return
+        hd.setGeometry(sb.x() + sb.width() - SIDEBAR_HANDLE_W // 2, sb.y(),
+                       SIDEBAR_HANDLE_W, sb.height())
+        hd.raise_()
 
     def _clean_thread(self, t: QThread) -> None:
         if t in self._threads:
             self._threads.remove(t)
+        t.deleteLater()  # 线程已结束，释放对象，避免长期使用累积
+
+    def shutdown(self) -> None:
+        """退出前回收后台线程：请求中断并等待结束。
+
+        QThread 若在运行中被父对象连带析构，Qt 会 qFatal 导致进程直接崩溃，
+        因此真正退出前必须确保所有线程已结束。全局 STOP_EVENT 已让分页循环提前返回。
+        """
+        threads = [t for t in self._threads if t.isRunning()]
+        for t in threads:
+            t.requestInterruption()
+        for t in threads:
+            if not t.wait(SHUTDOWN_WAIT_MS):
+                logging.warning("后台线程未在 %dms 内结束", SHUTDOWN_WAIT_MS)
+        self._threads.clear()
 
     # ---------- 播放相关 ----------
     def _on_song_changed(self, song: Song) -> None:
@@ -1254,8 +1698,8 @@ class LibraryPage(QWidget):
         self.like_btn.set_activated(False)
         self.like_btn.icon_name = "heart"
         self.like_btn.update()
-        self.song_delegate.set_current(song.id, self.player.is_playing())
-        self.artist_song_delegate.set_current(song.id, self.player.is_playing())
+        self.song_delegate.set_current(song.id, self.player.state() == STATE_PLAYING)
+        self.artist_song_delegate.set_current(song.id, self.player.state() == STATE_PLAYING)
         self.song_view.viewport().update()
         self.artist_song_view.viewport().update()
         self.lyrics.load(song)
@@ -1266,15 +1710,35 @@ class LibraryPage(QWidget):
         self.song_delegate.is_playing = playing
         self.artist_song_delegate.is_playing = playing
         if playing:
-            self._anim_timer.start()
+            if self._should_animate():
+                self._anim_timer.start()
         else:
             self._anim_timer.stop()
             self.song_view.viewport().update()
             self.artist_song_view.viewport().update()
 
+    def _should_animate(self) -> bool:
+        """四柱律动动画只在「歌曲列表视图可见」时跑（沉浸页/托盘/专辑页都不需要）。"""
+        return (self.isVisible()
+                and self.content_stack.currentIndex() == _VIEW_SONG
+                and not self.song_view.viewport().visibleRegion().isEmpty())
+
     def _anim_tick(self) -> None:
+        if not self._should_animate():
+            self._anim_timer.stop()  # 切走/隐藏后停止空转，回到该视图时由 showEvent 重启
+            return
         self.song_view.viewport().update()
         self.artist_song_view.viewport().update()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        # 用“意图状态”而非 media 实际状态：暂停淡出尚未结束时不应重启律动
+        if self.player.state() == STATE_PLAYING and self._should_animate():
+            self._anim_timer.start()  # 从沉浸页返回/托盘恢复后继续律动
+
+    def hideEvent(self, event) -> None:
+        super().hideEvent(event)
+        self._anim_timer.stop()
 
     def _on_position(self, ms: int) -> None:
         self.progress.set_value(ms, notify=False)
@@ -1290,6 +1754,8 @@ class LibraryPage(QWidget):
         self.btn_mode.update()
 
     def _set_nav_active(self, item: NavItem | None) -> None:
+        self._cancel_search_silently()  # 用户改点导航/歌单 → 静默退出搜索，由新导航决定视图
+        self._nav_active = item
         for nav in (self.nav_home, self.nav_starred,
                     self.nav_recent, self.nav_artist, self.nav_album):
             nav.set_active(nav is item)
@@ -1325,6 +1791,13 @@ class LibraryPage(QWidget):
             self.mini_lyrics.raise_()
             # 侧边栏图层高于歌词层，避免歌词盖住左侧
             self.sidebar.raise_()
+            self._layout_sidebar_handle()
+        # A2：列表缘渐隐跟随视口尺寸
+        for fade in (getattr(self, "_song_fade", None), getattr(self, "_pl_fade", None)):
+            if fade is not None:
+                fade.refresh()
+        if getattr(self, "_veil", None) is not None and self._veil.isVisible():
+            self._play_view_fade()
 
     # ---------- 列表封面/歌手/专辑 点击与悬浮（事件过滤） ----------
     def eventFilter(self, obj, event) -> bool:
@@ -1389,24 +1862,27 @@ class LibraryPage(QWidget):
         else:
             view, delegate = self.artist_song_view, self.artist_song_delegate
         row = self._row_at(view, pos)
-        delegate.hover_row = row
         cursor = Qt.CursorShape.ArrowCursor
+        cover_hover = artist_hover = album_hover = -1
         if row >= 0:
             rect = view.visualRect(view.model().index(row, 0))
             songs = self.current_songs if view is self.song_view else self.artist_songs
             artist_text = songs[row].artist if row < len(songs) and songs[row] else ""
             zone = song_zone(rect, pos.x(), pos.y(), artist_text)
-            delegate.cover_hover = row if zone == "cover" else -1
-            delegate.artist_hover = row if zone == "artist" else -1
-            delegate.album_hover = row if zone == "album" else -1
+            cover_hover = row if zone == "cover" else -1
+            artist_hover = row if zone == "artist" else -1
+            album_hover = row if zone == "album" else -1
             if zone in ("cover", "artist", "album"):
                 cursor = Qt.CursorShape.PointingHandCursor
-        else:
-            delegate.cover_hover = -1
-            delegate.artist_hover = -1
-            delegate.album_hover = -1
+        # 只有悬浮状态真变化时才重绘（鼠标移动事件非常密集）
+        if (delegate.hover_row, delegate.cover_hover, delegate.artist_hover, delegate.album_hover) != \
+                (row, cover_hover, artist_hover, album_hover):
+            delegate.hover_row = row
+            delegate.cover_hover = cover_hover
+            delegate.artist_hover = artist_hover
+            delegate.album_hover = album_hover
+            view.viewport().update()
         view.viewport().setCursor(cursor)
-        view.viewport().update()
 
     def _row_click(self, obj, pos) -> bool:
         if obj is self.song_view.viewport():
@@ -1446,8 +1922,7 @@ class LibraryPage(QWidget):
         item = self._pl_model.data(index, Qt.ItemDataRole.UserRole)
         if item:
             self._set_nav_active(None)
-            self._play_after_load = True
-            self.load_playlist(item[0])
+            self.load_playlist(item[0], play_after=True)
 
     def _on_song_double_clicked(self, index: QModelIndex) -> None:
         self._play_from(index.row())
@@ -1458,6 +1933,7 @@ class LibraryPage(QWidget):
 
     def _play_all(self) -> None:
         if self.current_songs:
+            self.player.set_mode(MODE_LIST)  # 播放全部同时切回列表循环
             self.player.set_queue(self.current_songs, 0)
 
     def _play_random(self) -> None:

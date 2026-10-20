@@ -3,8 +3,20 @@ from __future__ import annotations
 
 import bisect
 import math
+import time
+from functools import lru_cache
 
-from PySide6.QtCore import QAbstractListModel, QModelIndex, QRect, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import (
+    QAbstractListModel,
+    QEvent,
+    QModelIndex,
+    QRect,
+    QRectF,
+    QSize,
+    Qt,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -29,12 +41,19 @@ from PySide6.QtWidgets import (
 )
 
 from app.subsonic_client import LyricLine
-from ui import icons, theme
+from ui import anim, icons, theme
+from ui.anim import Motion, ease_out_cubic, mix, reduced_motion, request
 
 
 # ---------- 绘制辅助 ----------
 def _q(c) -> QColor:
-    return c if isinstance(c, QColor) else QColor(c)
+    """统一转成 QColor，**始终返回副本**。
+
+    调用方（如 _paint_inset_shadow）常会对结果 setAlpha 调整；若把调色板里的
+    同一个 QColor 对象直接返回，就会被原地改掉——曾导致 shadow_dark/shadow_light
+    的 alpha 每绘制一次内凹面就乘 0.8，几秒后整套新拟态阴影衰减到几乎为 0。
+    """
+    return QColor(c)
 
 
 def _rounded_path(rect: QRectF, radius: float):
@@ -130,9 +149,70 @@ class NeuFrame(QFrame):
         paint_raised(p, r, self._radius, self._fill, self._inset)
 
 
+# ---------- 按钮动效基类 ----------
+class MotionButton(QAbstractButton):
+    """带「悬浮 / 按压」过渡的按钮基类——按下缩小、松开回弹、悬浮渐变。
+
+    paint 时读 `hover_t` / `press_t`（0..1，已缓动），过渡完全由 `ui.anim` 的
+    全局 ticker 驱动，空闲时没有任何定时器开销。
+    """
+
+    SCALE_ON_PRESS = 0.94    # 按下缩到多小
+    SCALE_ON_HOVER = 1.0     # 悬浮放大（默认不放大）
+    OFFSET_ON_PRESS = 1.5    # 按下时内容右下位移（模拟物理按压）
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._hover_m = Motion(self, anim.HOVER_MS)
+        self._press_m = Motion(self, anim.PRESS_MS)
+
+    # 供 paint 读取
+    def hover_t(self) -> float:
+        return self._hover_m.value()
+
+    def press_t(self) -> float:
+        return self._press_m.value()
+
+    def _apply_press_transform(self, p: QPainter) -> None:
+        """以中心为原点做「按下缩小 / 悬浮放大」。必须在画任何内容之前调用。"""
+        t = self.press_t()
+        h = self.hover_t() if self.press_t() <= 0.0 else 0.0
+        scale = 1.0
+        if t > 0.0:
+            scale = 1.0 + (self.SCALE_ON_PRESS - 1.0) * t
+        elif h > 0.0 and self.SCALE_ON_HOVER != 1.0:
+            scale = 1.0 + (self.SCALE_ON_HOVER - 1.0) * h
+        if scale == 1.0:
+            return
+        cx, cy = self.width() / 2.0, self.height() / 2.0
+        p.translate(cx, cy)
+        p.scale(scale, scale)
+        p.translate(-cx, -cy)
+
+    def press_offset(self) -> float:
+        return self.OFFSET_ON_PRESS * self.press_t()
+
+    def enterEvent(self, event) -> None:
+        self._hover_m.to(1.0)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._hover_m.to(0.0)
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._press_m.to(1.0)
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        self._press_m.to(0.0)
+        super().mouseReleaseEvent(event)
+
+
 # ---------- 文字按钮 ----------
-class NeuButton(QAbstractButton):
-    """新拟态文字按钮：raised，hover 提亮，按下位移。"""
+class NeuButton(MotionButton):
+    """新拟态文字按钮：raised，悬浮渐亮，按下平滑转为内凹并缩小。"""
 
     def __init__(self, text: str = "", parent=None, accent: bool = False, ghost: bool = False) -> None:
         super().__init__(parent)
@@ -146,28 +226,32 @@ class NeuButton(QAbstractButton):
         pal = theme.CURRENT
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p.save()
+        self._apply_press_transform(p)
         r = QRectF(self.rect()).adjusted(4, 4, -4, -4)
-        pressed = self.isDown()
-        hovered = self.underMouse() and not pressed
-        if pressed:
+        # accent 按钮恒为高亮态；普通按钮按悬浮进度从 raise 渐变到 primary_soft
+        hov = 1.0 if (self.accent or self.ghost) else self.hover_t()
+        base = mix(_q(pal["raise"]), _q(pal["primary_soft"]), hov)
+        paint_raised(p, r, 14, base)
+        pr = self.press_t()
+        if pr > 0.0:  # 叠加内凹态（按进度混合），抬起 → 按下的形态是平滑的
+            p.setOpacity(pr)
             paint_raised(p, r, 14, pal["press"], inset=True)
-        elif self.accent or hovered:
-            paint_raised(p, r, 14, pal["primary_soft"])
-        else:
-            paint_raised(p, r, 14, pal["raise"])
-        color = QColor(pal["primary_text"]) if (self.accent or hovered) else QColor(pal["text"])
+            p.setOpacity(1.0)
+        color = mix(_q(pal["text"]), _q(pal["primary_text"]), max(hov, pr))
         f = self.font()
         f.setPointSizeF(10)
         f.setWeight(QFont.Weight.Medium)
         p.setFont(f)
         p.setPen(color)
-        off = 2 if pressed else 0
+        off = self.press_offset()
         p.drawText(r.translated(off, off), Qt.AlignmentFlag.AlignCenter, self.text())
+        p.restore()
 
 
 # ---------- 图标按钮（纯色扁平） ----------
-class NeuIconButton(QAbstractButton):
-    """纯色扁平图标按钮：常态 muted，hover primary，按下向右下位移。"""
+class NeuIconButton(MotionButton):
+    """纯色扁平图标按钮：常态 muted，悬浮渐变为 primary，按下缩小。"""
 
     def __init__(self, icon_name: str, parent=None, px: int = 22) -> None:
         super().__init__(parent)
@@ -175,6 +259,7 @@ class NeuIconButton(QAbstractButton):
         self.px = px
         self.accent_color: str | None = None  # 激活色（如收藏红）
         self.activated = False
+        self._pix_cache: tuple | None = None
         self.setFixedSize(34, 34)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -188,19 +273,28 @@ class NeuIconButton(QAbstractButton):
         pal = theme.CURRENT
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p.save()
+        self._apply_press_transform(p)
+        hov = max(self.hover_t(), self.press_t())
         if self.activated and self.accent_color:
             color = QColor(self.accent_color)
-        elif self.underMouse() or self.isDown():
-            color = QColor(pal["primary"])
         else:
-            color = QColor(pal["text_muted"])
-        off = 2 if self.isDown() else 0
-        pix = icons.pixmap(self.icon_name, color.name(), self.px)
-        p.drawPixmap((self.width() - self.px) // 2 + off, (self.height() - self.px) // 2 + off, pix)
+            color = mix(_q(pal["text_muted"]), _q(pal["primary"]), hov)
+        off = self.press_offset()
+        pix = self._icon_pix(color.name())
+        p.drawPixmap(int((self.width() - self.px) / 2 + off), int((self.height() - self.px) / 2 + off), pix)
+        p.restore()
+
+    def _icon_pix(self, color_name: str) -> QPixmap:
+        """图标按 (名称, 颜色) 缓存：paint 里重渲 SVG 会随帧数放大开销。"""
+        key = (self.icon_name, color_name, self.px)
+        if self._pix_cache is None or self._pix_cache[0] != key:
+            self._pix_cache = (key, icons.pixmap(self.icon_name, color_name, self.px))
+        return self._pix_cache[1]
 
 
 # ---------- 播放键 ----------
-class SkipButton(QAbstractButton):
+class SkipButton(MotionButton):
     """上一曲/下一曲：实心三角形 + 圆角竖条（与 NeuIconButton 同尺寸同交互）。"""
 
     def __init__(self, direction: int, parent=None, px: int = 19) -> None:
@@ -214,11 +308,10 @@ class SkipButton(QAbstractButton):
         pal = theme.CURRENT
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        if self.underMouse() or self.isDown():
-            color = QColor(pal["primary"])
-        else:
-            color = QColor(pal["text_muted"])
-        off = 2 if self.isDown() else 0
+        p.save()
+        self._apply_press_transform(p)
+        color = mix(_q(pal["text_muted"]), _q(pal["primary"]), max(self.hover_t(), self.press_t()))
+        off = self.press_offset()
         cx = self.width() / 2 + off
         cy = self.height() / 2 + off
         s = self.px
@@ -255,16 +348,18 @@ class SkipButton(QAbstractButton):
         p.setPen(pen)
         p.setBrush(color)
         p.drawPath(path)
+        p.restore()
 
 
-class PlayButton(QAbstractButton):
-    """实心圆形播放/暂停键。"""
+class PlayButton(MotionButton):
+    """实心圆形播放/暂停键：悬浮轻微放大、按下缩小回弹。"""
 
-    playing = False
+    SCALE_ON_HOVER = 1.04
 
     def __init__(self, parent=None, px: int = 44) -> None:
         super().__init__(parent)
         self.px = px
+        self.playing = False
         self.setFixedSize(px, px)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -272,14 +367,14 @@ class PlayButton(QAbstractButton):
         self.playing = on
         self.update()
 
-    def paintEvent(self, event: QPaintEvent) -> None:
+    def paintEvent(self, event) -> None:
         pal = theme.CURRENT
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p.save()
+        self._apply_press_transform(p)
         r = QRectF(self.rect()).adjusted(4, 4, -4, -4)
         paint_raised(p, r, r.width() / 2, pal["primary"])
-        if self.isDown():
-            p.translate(2, 2)
         c = _q(pal["on_primary"])
         cx = self.width() / 2
         cy = self.height() / 2
@@ -304,6 +399,7 @@ class PlayButton(QAbstractButton):
             p.setPen(pen)
             p.setBrush(c)
             p.drawPath(path)
+        p.restore()
 
 
 # ---------- 自定义滑块（进度/音量） ----------
@@ -324,6 +420,11 @@ class HoverSlider(QWidget):
         self._val = value
         self._hover = False
         self._drag = False
+        # A3：拖动点浮现/缩放过渡；A4：显示值平滑追赶（程序推进/跳转时不硬跳）
+        self._thumb_m = Motion(self, anim.HOVER_MS)
+        self._disp_from = float(value)
+        self._disp_to = float(value)
+        self._ease_t0 = 0.0
         self.setMinimumHeight(18)
         self.setMaximumHeight(18)
         self.setMouseTracking(True)
@@ -333,13 +434,22 @@ class HoverSlider(QWidget):
         self._min = minimum
         self._max = max(maximum, minimum + 1)
         self._val = max(minimum, min(maximum, self._val))
+        self._disp_from = self._disp_to = float(self._val)
         self.update()
 
-    def set_value(self, v: int, notify: bool = True) -> None:
+    def set_value(self, v: int, notify: bool = True, ease: bool = True) -> None:
+        """ease=True（默认）时显示值平滑追赶目标；用户拖动路径会传 ease=False 以严格跟手。"""
         v = max(self._min, min(self._max, int(v)))
         if v == self._val:
             return
         self._val = v
+        if ease and not self._drag and not reduced_motion():
+            self._disp_from = self._eased()
+            self._disp_to = float(v)
+            self._ease_t0 = time.monotonic()
+            request(self, anim.EASE_MS)
+        else:
+            self._disp_from = self._disp_to = float(v)
         if notify:
             self.valueChanged.emit(v)
         self.update()
@@ -347,8 +457,16 @@ class HoverSlider(QWidget):
     def value(self) -> int:
         return self._val
 
+    def _eased(self) -> float:
+        if self._disp_from == self._disp_to:
+            return self._disp_to
+        t = (time.monotonic() - self._ease_t0) * 1000.0 / max(1, anim.EASE_MS)
+        if t >= 1.0:
+            return self._disp_to
+        return self._disp_from + (self._disp_to - self._disp_from) * ease_out_cubic(t)
+
     def _ratio(self) -> float:
-        return (self._val - self._min) / (self._max - self._min)
+        return (self._eased() - self._min) / (self._max - self._min)
 
     def _value_from_x(self, x: float) -> int:
         w = max(1, self.width())
@@ -374,14 +492,17 @@ class HoverSlider(QWidget):
             fill = QRectF(track.left(), ty, track.width() * ratio, track_h)
             p.setBrush(_q(pal["primary"]))
             p.drawRoundedRect(fill, track_h / 2, track_h / 2)
-        if self._hover or self._drag:
+        reveal = self._thumb_m.value()
+        if reveal > 0.01:
             cx = track.left() + track.width() * ratio
             cy = h / 2
+            rad = 6.5 * (0.5 + 0.5 * reveal)  # 浮现时从小到大，避免"突然出现"
             p.setBrush(_q(pal["primary"]))
-            p.drawEllipse(QRectF(cx - 6.5, cy - 6.5, 13, 13))
+            p.drawEllipse(QRectF(cx - rad, cy - rad, rad * 2, rad * 2))
 
     def mousePressEvent(self, event) -> None:
         self._drag = True
+        self._thumb_m.to(1.0)
         self._set_from_x(event.position().x())
         event.accept()
 
@@ -391,22 +512,27 @@ class HoverSlider(QWidget):
             event.accept()
         else:
             self._hover = True
+            self._thumb_m.to(1.0)
             self.hoverValueChanged.emit(self._value_from_x(event.position().x()))
             self.update()
 
     def mouseReleaseEvent(self, event) -> None:
         self._drag = False
+        self._thumb_m.to(1.0 if self.underMouse() else 0.0)
         self.update()
         event.accept()
 
     def enterEvent(self, event) -> None:
         self._hover = True
+        self._thumb_m.to(1.0)
         self.hoverValueChanged.emit(self._value_from_x(self.mapFromGlobal(self.cursor().pos()).x()))
         self.update()
         super().enterEvent(event)
 
     def leaveEvent(self, event) -> None:
         self._hover = False
+        if not self._drag:
+            self._thumb_m.to(0.0)
         self.hoverEnded.emit()
         self.update()
         super().leaveEvent(event)
@@ -445,7 +571,7 @@ class CoverArt(QWidget):
         self._pix: QPixmap | None = None
         self._radius = radius
         self._round = False
-        self._hover = False
+        self._hover_m = Motion(self, anim.HOVER_MS)
         self._toggle = False  # 悬浮时显示切换图标
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -483,14 +609,13 @@ class CoverArt(QWidget):
             p.drawPath(path)
             ip = icons.pixmap("note", "#FFFFFF", 34, stroke=1.5)
             p.drawPixmap(int((self.width() - 34) / 2), int((self.height() - 34) / 2), ip)
-        if self._hover and self._toggle:
+        hv = self._hover_m.value()
+        if hv > 0.01 and self._toggle:
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor(0, 0, 0, 90))
+            p.setBrush(QColor(0, 0, 0, int(90 * hv)))
             p.drawPath(path)
-            if self._round:
-                ico = icons.pixmap("album", pal["on_primary"], 30, stroke=1.8)
-            else:
-                ico = icons.pixmap("note", pal["on_primary"], 30, stroke=1.8)
+            ico = icons.pixmap("album" if self._round else "note", pal["on_primary"], 30, stroke=1.8)
+            p.setOpacity(hv)
             p.drawPixmap(int((self.width() - 30) / 2), int((self.height() - 30) / 2), ico)
 
     def mousePressEvent(self, event) -> None:
@@ -498,12 +623,12 @@ class CoverArt(QWidget):
         event.accept()
 
     def enterEvent(self, event) -> None:
-        self._hover = True
+        self._hover_m.to(1.0)
         self.update()
         super().enterEvent(event)
 
     def leaveEvent(self, event) -> None:
-        self._hover = False
+        self._hover_m.to(0.0)
         self.update()
         super().leaveEvent(event)
 
@@ -542,6 +667,9 @@ SONG_TITLE_H = 19        # 歌名高度
 SONG_ARTIST_H = 15       # 歌手高度
 SONG_TEXT_GAP = 5        # 歌名/歌手间距
 
+# song_zone 每次鼠标移动都会被调用，QFontMetrics 构建开销大 → 模块级缓存复用
+_ARTIST_FM: QFontMetrics | None = None
+
 
 def song_cols(x0: int, w: int) -> tuple[int, int, int, int, int, int]:
     """歌曲行三列几何：歌名/歌手列自适应，专辑/时长固定（时长左对齐）。
@@ -562,6 +690,7 @@ def song_zone(rect: QRect, x: float, y: float, artist_text: str = "") -> str:
 
     artist 区域收窄到文本实际宽度，避免误触整列。
     """
+    global _ARTIST_FM
     cs = SONG_COVER
     h = rect.height()
     cover_rect = QRect(rect.left() + SONG_COVER_X, rect.top() + (h - cs) // 2, cs, cs)
@@ -572,15 +701,173 @@ def song_zone(rect: QRect, x: float, y: float, artist_text: str = "") -> str:
     block_top = cover_rect.top() + (cs - block_h) // 2
     artist_rect = QRect(c0x, block_top + SONG_TITLE_H + SONG_TEXT_GAP, c0w, SONG_ARTIST_H)
     if artist_text:
-        # 收窄到文本实际宽度（与绘制字体一致）
-        fm = QFontMetrics(QFont("Microsoft YaHei UI", 9))
-        artist_rect.setWidth(min(c0w, fm.horizontalAdvance(artist_text)))
+        # 收窄到文本实际宽度（与绘制字体一致）。QFontMetrics 构建开销大，这里缓存复用。
+        if _ARTIST_FM is None:
+            _ARTIST_FM = QFontMetrics(QFont("Microsoft YaHei UI", 9))
+        artist_rect.setWidth(min(c0w, _ARTIST_FM.horizontalAdvance(artist_text)))
     if artist_rect.contains(int(x), int(y)):
         return "artist"
     alb_rect = QRect(alb_x, rect.top(), alb_w - 10, h)
     if alb_rect.contains(int(x), int(y)):
         return "album"
     return "none"
+
+
+def _can_shimmer(cover_manager, cover_id: str) -> bool:
+    """是否值得给这个占位做扫光：有封面 id，且还没被确认取不到。
+
+    没有 id（永远不会来封面）或已失败的条目若继续扫光，会变成永久 60fps 重绘。
+    """
+    if not cover_id or cover_manager is None:
+        return False
+    checker = getattr(cover_manager, "is_failed", None)
+    return not (checker is not None and checker(cover_id))
+
+
+@lru_cache(maxsize=64)
+def _placeholder_base(w: int, h: int, radius: int) -> QPixmap:
+    """占位封面底图（圆角渐变 + 音符）预渲染缓存。
+
+    底图本来每帧都要重做「圆角路径裁剪 + 两次渐变 + 图标渲染」，预渲染后每帧只剩一次 blit。
+    """
+    pm = QPixmap(w, h)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    path = _rounded_path(QRectF(0, 0, w, h), radius)
+    grad = QLinearGradient(0, 0, w, h)
+    grad.setColorAt(0.0, QColor("#B9BDF5"))
+    grad.setColorAt(1.0, QColor("#6F73E8"))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(grad)
+    p.drawPath(path)
+    ip = icons.pixmap("note", "#FFFFFF", max(14, int(w * 0.45)), stroke=1.6)
+    p.drawPixmap((w - ip.width()) // 2, (h - ip.height()) // 2, ip)
+    p.end()
+    return pm
+
+
+def paint_cover_placeholder(p: QPainter, rect: QRect, radius: float = 8.0,
+                            shimmer: bool = True) -> None:
+    """封面占位：渐变底 + 音符 + 移动高光扫光（B3）。
+
+    底图走 `_placeholder_base` 预渲染缓存；扫光按 `rect` 请求继续重绘 ——
+    因此**只有仍在等封面的行**会持续重绘，封面到齐后自动停止（自终止）。
+
+    `shimmer=False` 时不扫光也不请求重绘：**没有封面 id、或该封面已确认取不到**的
+    条目必须传 False，否则会永远刷新下去。
+    """
+    p.drawPixmap(rect.topLeft(), _placeholder_base(rect.width(), rect.height(), int(radius)))
+    if shimmer and not reduced_motion():
+        p.save()
+        p.setClipPath(_rounded_path(QRectF(rect), radius))  # 高光带要裁在圆角内
+        phase = (time.monotonic() * 1000.0 % 1200.0) / 1200.0
+        span = rect.width() + rect.width() * 0.8
+        x = rect.left() - rect.width() * 0.8 + span * phase
+        g = QLinearGradient(x, rect.top(), x + rect.width() * 0.8, rect.top())
+        g.setColorAt(0.0, QColor(255, 255, 255, 0))
+        g.setColorAt(0.5, QColor(255, 255, 255, 44))
+        g.setColorAt(1.0, QColor(255, 255, 255, 0))
+        p.fillRect(rect, g)
+        p.restore()
+        device = p.device()
+        if isinstance(device, QWidget):
+            request(device, anim.SHIMMER_MS, rect, anim.SHIMMER_EVERY_MS)
+
+
+class ListEdgeFade(QWidget):
+    """列表上下缘渐隐遮罩（A2）：有内容超出时用底色渐变淡出，暗示还能继续滚动。
+
+    鼠标穿透（不影响列表交互）；只在状态变化时重绘，几乎无开销。
+    """
+
+    H = 26
+
+    def __init__(self, view, parent=None) -> None:
+        super().__init__(parent or view)
+        self._view = view
+        self._top = False
+        self._bottom = False
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        sb = view.verticalScrollBar()
+        sb.valueChanged.connect(self.refresh)
+        sb.rangeChanged.connect(lambda *_: self.refresh())
+        view.installEventFilter(self)
+
+    def eventFilter(self, obj, event) -> bool:
+        if obj is self._view and event.type() in (QEvent.Type.Resize, QEvent.Type.Show):
+            self.refresh()
+        return False
+
+    def refresh(self) -> None:
+        """按滚动条位置决定上下缘是否需要渐隐，并跟随视口几何。"""
+        sb = self._view.verticalScrollBar()
+        top = sb.value() > sb.minimum()
+        bottom = sb.value() < sb.maximum()
+        vp = self._view.viewport()
+        self.setGeometry(vp.x(), vp.y(), vp.width(), vp.height())
+        self.raise_()
+        if (top, bottom) != (self._top, self._bottom):
+            self._top, self._bottom = top, bottom
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        if not (self._top or self._bottom):
+            return
+        base = QColor(theme.CURRENT["clay"])
+        h = min(self.H, max(1, self.height() // 3))
+        p = QPainter(self)
+        if self._top:
+            g = QLinearGradient(0, 0, 0, h)
+            g.setColorAt(0.0, QColor(base.red(), base.green(), base.blue(), 240))
+            g.setColorAt(1.0, QColor(base.red(), base.green(), base.blue(), 0))
+            p.fillRect(0, 0, self.width(), h, g)
+        if self._bottom:
+            g = QLinearGradient(0, self.height() - h, 0, self.height())
+            g.setColorAt(0.0, QColor(base.red(), base.green(), base.blue(), 0))
+            g.setColorAt(1.0, QColor(base.red(), base.green(), base.blue(), 240))
+            p.fillRect(0, self.height() - h, self.width(), h, g)
+
+
+class FadeVeil(QWidget):
+    """视图切换时的「从底色淡入」遮罩（B2）：盖住目标区域后按进度淡出。
+
+    刻意不用 QGraphicsOpacityEffect —— 那会让整页走离屏渲染，大列表下开销明显；
+    这里只画一层底色并逐帧降低 alpha，成本固定且很小。
+    """
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._t0 = 0.0
+        self._ms = 0
+        self.hide()
+
+    def play(self, rect: QRect, ms: int = 130) -> None:
+        if reduced_motion() or ms <= 0:
+            self.hide()
+            return
+        self._ms = ms
+        self._t0 = time.monotonic()
+        self.setGeometry(rect)
+        self.show()
+        self.raise_()
+        request(self, ms)
+
+    def _progress(self) -> float:
+        if self._ms <= 0:
+            return 1.0
+        return ease_out_cubic((time.monotonic() - self._t0) * 1000.0 / self._ms)
+
+    def paintEvent(self, event) -> None:
+        t = self._progress()
+        if t >= 1.0:
+            self.hide()
+            return
+        base = QColor(theme.CURRENT["clay"])
+        base.setAlpha(int(255 * (1.0 - t)))
+        p = QPainter(self)
+        p.fillRect(self.rect(), base)
 
 
 class SongDelegate(QStyledItemDelegate):
@@ -600,6 +887,25 @@ class SongDelegate(QStyledItemDelegate):
         self.artist_hover: int = -1   # 鼠标悬浮在歌手名区域的行（可点击高亮）
         self.album_hover: int = -1    # 鼠标悬浮在专辑名区域的行（可点击高亮）
         self.cover_right = SONG_COVER_X + SONG_COVER  # 封面区域右边界（用于命中检测）
+        # B4：列表换内容时可见行逐行淡入（只做一次，之后滚动到的行不再动画）
+        self._intro_t0 = 0.0
+        self._intro_until = 0.0
+
+    def begin_intro(self) -> None:
+        """内容刚换好时调用：让首屏可见行逐行淡入。"""
+        if reduced_motion():
+            return
+        self._intro_t0 = time.monotonic()
+        self._intro_until = self._intro_t0 + (
+            anim.STAGGER_STEP_MS * 14 + anim.STAGGER_DUR_MS) / 1000.0
+
+    def _stagger(self, row: int) -> float:
+        if self._intro_t0 <= 0.0:
+            return 1.0
+        if time.monotonic() > self._intro_until:
+            self._intro_t0 = 0.0  # 入场只做一次，避免滚动到新行时又从头动画
+            return 1.0
+        return anim.staggered_t(self._intro_t0, min(row, 14))
 
     def set_current(self, song_id: str, playing: bool = False) -> None:
         self.current_id = song_id
@@ -636,6 +942,12 @@ class SongDelegate(QStyledItemDelegate):
             return
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        intro = self._stagger(index.row())
+        if intro < 1.0:  # B4：逐行淡入（仅首屏那一次）
+            painter.setOpacity(intro)
+            device = painter.device()
+            if isinstance(device, QWidget):
+                request(device, anim.STAGGER_DUR_MS, QRect(option.rect))
         r = QRect(option.rect)
         row = index.row()
         is_current = song.id == self.current_id
@@ -661,14 +973,8 @@ class SongDelegate(QStyledItemDelegate):
         if pix:
             painter.drawPixmap(cover_rect, pix)
         else:
-            grad = QLinearGradient(cover_rect.topLeft(), cover_rect.bottomRight())
-            grad.setColorAt(0.0, QColor("#B9BDF5"))
-            grad.setColorAt(1.0, QColor("#6F73E8"))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(grad)
-            painter.drawRect(cover_rect)
-            ip = icons.pixmap("note", "#FFFFFF", 22, stroke=1.6)
-            painter.drawPixmap(cover_rect.left() + (cs - 22) // 2, cover_rect.top() + (cs - 22) // 2, ip)
+            # B3：占位 + 扫光；没有封面 id 或已确认取不到时不扫光（否则会永远刷新）
+            paint_cover_placeholder(painter, cover_rect, 8, shimmer=_can_shimmer(self.cover, song.cover_id))
         # 封面上的状态叠加
         cover_hit = row == self.cover_hover
         if hovered or cover_hit:
@@ -946,14 +1252,9 @@ class AlbumDelegate(QStyledItemDelegate):
             painter.drawPixmap(cover_rect, pix)
             painter.restore()
         else:
-            grad = QLinearGradient(cover_rect.topLeft(), cover_rect.bottomRight())
-            grad.setColorAt(0.0, QColor("#B9BDF5"))
-            grad.setColorAt(1.0, QColor("#6F73E8"))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(grad)
-            painter.drawRoundedRect(QRectF(cover_rect), 12, 12)
-            ip = icons.pixmap("note", "#FFFFFF", int(cw * 0.4), stroke=1.6)
-            painter.drawPixmap(cover_rect.left() + (cw - ip.width()) // 2, cover_rect.top() + (cw - ip.height()) // 2, ip)
+            # 专辑网格**不做扫光**：实测 60 个瓦片整帧重绘约 45ms（圆角裁剪+两次渐变主导），
+            # 25fps 下会吃掉一个核，与「保证流畅度」冲突。列表只有十几行小图，扫光成本可忽略。
+            paint_cover_placeholder(painter, cover_rect, 12, shimmer=False)
         if hover:
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor(0, 0, 0, 30))
@@ -1112,14 +1413,7 @@ class PlaylistDelegate(QStyledItemDelegate):
             painter.drawPixmap(cr, pix)
             painter.restore()
         else:
-            grad = QLinearGradient(cr.topLeft(), cr.bottomRight())
-            grad.setColorAt(0.0, QColor("#B9BDF5"))
-            grad.setColorAt(1.0, QColor("#6F73E8"))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(grad)
-            painter.drawRoundedRect(QRectF(cr), 8, 8)
-            ip = icons.pixmap("note", "#FFFFFF", 18, stroke=1.7)
-            painter.drawPixmap(cr.left() + (cs - 18) // 2, cr.top() + (cs - 18) // 2, ip)
+            paint_cover_placeholder(painter, cr, 8, shimmer=_can_shimmer(self.cover, cover_id))  # B3
         # 名称
         f = QFont(option.font)
         f.setPointSizeF(9.5)

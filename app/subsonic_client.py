@@ -17,6 +17,17 @@ import requests
 API_VERSION = "1.16.1"
 CLIENT_NAME = "mup"
 
+# (连接超时, 读取超时) 秒。退出时最坏只等这么久，避免关闭进程长时间卡住。
+TIMEOUT = (5, 12)
+
+# 全局退出信号：退出时置位，分页等长循环据此提前返回（不必等完整轮次跑完）。
+STOP_EVENT = threading.Event()
+
+
+def request_stop() -> None:
+    """请求所有进行中的网络循环尽快结束（仅在应用退出时调用）。"""
+    STOP_EVENT.set()
+
 
 def _as_list(value: Any):
     """Subsonic 对单元素直接返回 dict，统一转成 list。"""
@@ -149,7 +160,7 @@ class SubsonicClient:
         token = hashlib.md5((self.password + salt).encode("utf-8")).hexdigest()
         return {"u": self.username, "t": token, "s": salt, "v": API_VERSION, "c": CLIENT_NAME, "f": "json"}
 
-    def _get(self, view: str, timeout: float = 15, **params: Any) -> dict:
+    def _get(self, view: str, timeout=TIMEOUT, **params: Any) -> dict:
         req = dict(self._auth)
         req.update(params)
         resp = self.session.get(f"{self.base}/{view}", params=req, timeout=timeout)
@@ -160,6 +171,13 @@ class SubsonicClient:
             err = body.get("error", {}) or {}
             raise ConnectionError(f"Subsonic 错误: {err.get('message', '未知错误')}")
         return body
+
+    def close(self) -> None:
+        """关闭底层连接池（退出时调用，让阻塞中的请求尽快报错返回）。"""
+        try:
+            self.session.close()
+        except Exception:  # noqa: BLE001
+            pass
 
     # ---------- 基础 ----------
     def ping(self) -> bool:
@@ -187,6 +205,8 @@ class SubsonicClient:
         step = page_size
         offset = 0
         while offset < max_pages * step and len(songs) < max_pages * page_size:
+            if STOP_EVENT.is_set():
+                break  # 应用正在退出，尽快返回
             body = self._get("getPlaylist", id=playlist_id, offset=offset, count=step)
             page = [_parse_song(n) for n in _as_list((body.get("playlist") or {}).get("entry"))]
             if not page:
@@ -271,12 +291,14 @@ class SubsonicClient:
         songs: list[Song] = []
         start = 0
         while start < max_items:
+            if STOP_EVENT.is_set():
+                break  # 应用正在退出，尽快返回
             try:
                 resp = self.session.get(
                     f"{self.base_root}/Playlists/{jf_pid}/Items",
                     params={"userId": uid, "StartIndex": start, "Limit": limit},
                     headers=headers,
-                    timeout=25,
+                    timeout=TIMEOUT,
                 )
                 body = resp.json()
             except Exception:  # noqa: BLE001
@@ -298,6 +320,8 @@ class SubsonicClient:
         """读取每个歌单的真实歌曲数（部分服务端 getPlaylists 不带 songCount，需按歌单查询）。"""
         counts: dict[str, int] = {}
         for pl in playlists:
+            if STOP_EVENT.is_set():
+                break
             count = int(pl.song_count or 0)
             try:
                 body = self._get("getPlaylist", id=pl.id)
@@ -346,6 +370,8 @@ class SubsonicClient:
         """取某歌手的全部歌曲（逐专辑合并，后台线程调用）。"""
         songs: list[Song] = []
         for album in self.get_artist_albums(artist_id):
+            if STOP_EVENT.is_set():
+                break
             try:
                 songs.extend(self.get_album(album.id))
             except Exception:  # noqa: BLE001

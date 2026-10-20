@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import ctypes
+import time
 from ctypes import wintypes
 
 from PySide6.QtCore import QAbstractNativeEventFilter, QCoreApplication, QObject, Signal
@@ -129,7 +130,10 @@ class MediaKeyHook:
             kbd = ctypes.cast(l_param, ctypes.POINTER(_KBDLLHOOKSTRUCT)).contents
             action = _VK_TO_ACTION.get(int(kbd.vkCode))
             if action:
-                self._on_action(action)
+                try:
+                    self._on_action(action)
+                except Exception:  # noqa: BLE001 异常不能逃逸进 C 层，否则钩子会被系统移除
+                    pass
                 return 1  # 吞掉该键，避免其他应用重复响应
         return user32.CallNextHookEx(self._handle, n_code, w_param, l_param)
 
@@ -179,6 +183,7 @@ class GlobalHotkeys(QObject):
         super().__init__(parent)
         self._ids: dict[int, str] = {}
         self._next_id = 0x8000
+        self._last_seen: dict[str, float] = {}  # action → 上次触发时间，与 RegisterHotKey 去重
         self._filter = _HotkeyFilter(self._on_hotkey, self._on_media)
         QCoreApplication.instance().installNativeEventFilter(self._filter)
         self._media_hook = MediaKeyHook(self._on_media)
@@ -186,9 +191,17 @@ class GlobalHotkeys(QObject):
     def _on_hotkey(self, hotkey_id: int) -> None:
         action = self._ids.get(hotkey_id)
         if action:
-            self.triggered.emit(action)
+            self._dedup_emit(action)
 
     def _on_media(self, action: str) -> None:
+        self._dedup_emit(action)
+
+    def _dedup_emit(self, action: str) -> None:
+        """媒体键同时通过 LL 钩子和 RegisterHotKey 分发，150ms 内同一动作去重只发一次。"""
+        now = time.time()
+        if now - self._last_seen.get(action, 0) < 0.15:
+            return
+        self._last_seen[action] = now
         self.triggered.emit(action)
 
     def register(self, action: str, mods: int, vk: int) -> bool:
@@ -207,6 +220,22 @@ class GlobalHotkeys(QObject):
     def install_media_hook(self) -> bool:
         """安装媒体键低级钩子（代替 RegisterHotKey 注册媒体键）。"""
         return self._media_hook.install()
+
+    def register_media_keys(self) -> list[str]:
+        """用 RegisterHotKey 注册媒体键（全局、与窗口焦点无关，窗口最小化/隐藏后仍响应）。
+
+        被其它应用占用时注册失败，此时由低级钩子（install_media_hook）兜底；
+        两者都命中时 _dedup_emit 去重。返回注册失败的动作名（供日志排查）。
+        """
+        failed: list[str] = []
+        for action, vk in _MEDIA_KEY_MAP.items():
+            ok = user32.RegisterHotKey(None, self._next_id, MOD_NOREPEAT, vk)
+            if ok:
+                self._ids[self._next_id] = action
+                self._next_id += 1
+            else:
+                failed.append(action)
+        return failed
 
     def unregister_all(self) -> None:
         for hid in self._ids:

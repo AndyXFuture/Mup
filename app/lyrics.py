@@ -5,6 +5,7 @@ import re
 
 from PySide6.QtCore import QObject, QThread, Signal
 
+from app.config import SHUTDOWN_WAIT_MS
 from app.subsonic_client import LyricLine, SubsonicClient
 
 
@@ -28,7 +29,7 @@ def parse_lyrics(text: str) -> list[LyricLine]:
 
 
 class LyricsWorker(QThread):
-    result = Signal(object)  # list[LyricLine]
+    result = Signal(str, object)  # (song_id, list[LyricLine])
 
     def __init__(self, client: SubsonicClient, song, parent=None) -> None:
         super().__init__(parent)
@@ -36,9 +37,10 @@ class LyricsWorker(QThread):
         self.song = song
 
     def run(self) -> None:
+        song_id = self.song.id
         lines: list[LyricLine] = []
         try:
-            lines = self.client.get_lyrics_by_song_id(self.song.id)
+            lines = self.client.get_lyrics_by_song_id(song_id)
         except Exception:  # noqa: BLE001
             lines = []
         if not lines:
@@ -47,7 +49,10 @@ class LyricsWorker(QThread):
             except Exception:  # noqa: BLE001
                 text = ""
             lines = parse_lyrics(text)
-        self.result.emit(lines)
+        if self.isInterruptionRequested():
+            return  # 正在退出，丢弃结果
+        # 结果必须带上本线程实际请求的 song_id：切歌后旧线程返回的歌词不能被当成新歌的
+        self.result.emit(song_id, lines)
 
 
 class LyricsManager(QObject):
@@ -60,7 +65,6 @@ class LyricsManager(QObject):
         self.client = client
         self._cache: dict[str, list[LyricLine]] = {}
         self._worker: LyricsWorker | None = None
-        self._cur_song_id = ""
 
     def set_client(self, client) -> None:
         self.client = client
@@ -69,7 +73,6 @@ class LyricsManager(QObject):
     def load(self, song) -> None:
         if not self.client:
             return
-        self._cur_song_id = song.id
         if song.id in self._cache:
             self.loaded.emit(song.id, self._cache[song.id])
             return
@@ -79,6 +82,14 @@ class LyricsManager(QObject):
         self._worker.result.connect(self._on_loaded)
         self._worker.start()
 
-    def _on_loaded(self, lines) -> None:
-        self._cache[self._cur_song_id] = lines
-        self.loaded.emit(self._cur_song_id, lines)
+    def _on_loaded(self, song_id: str, lines) -> None:
+        self._cache[song_id] = lines
+        self.loaded.emit(song_id, lines)
+
+    def shutdown(self) -> None:
+        """退出前回收歌词线程（QThread 运行中被析构会 qFatal 崩溃）。"""
+        worker = self._worker
+        self._worker = None
+        if worker is not None and worker.isRunning():
+            worker.requestInterruption()
+            worker.wait(SHUTDOWN_WAIT_MS)

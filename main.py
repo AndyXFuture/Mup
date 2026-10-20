@@ -55,17 +55,19 @@ def main() -> int:
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))
 
-    # 单实例
-    shm = QSharedMemory("MupSingleInstance_v1")
-    if not shm.create(1):
-        QMessageBox.information(None, APP_NAME, "程序已在运行中。")
-        return 0
+    # 单实例（MUP_SMOKE 冒烟测试时跳过，避免与正在运行的实例冲突）
+    smoke = os.environ.get("MUP_SMOKE") == "1"
+    if not smoke:
+        shm = QSharedMemory("MupSingleInstance_v1")
+        if not shm.create(1):
+            QMessageBox.information(None, APP_NAME, "程序已在运行中。")
+            return 0
 
     config = Config()
     win = MainWindow(config)
     win.show()
 
-    if os.environ.get("MUP_SMOKE") == "1":
+    if smoke:
         # 冒烟测试：2 秒后自动退出
         from PySide6.QtCore import QTimer
 

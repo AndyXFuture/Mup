@@ -187,6 +187,8 @@ class PlayerPage(QWidget):
         self.lyrics.loaded.connect(self._on_lyrics_loaded)
         self.progress.hoverValueChanged.connect(lambda v: self.time_cur.setText(_fmt_ms(v)))
         self.progress.hoverEnded.connect(self._restore_time)
+        # 拖动进度条 → seek（此前漏了这条连接，沉浸页进度条只能显示不能拖）
+        self.progress.valueChanged.connect(lambda v: self.player.seek(v))
 
     def _toggle_shape(self) -> None:
         self.big_cover.set_round(not self.big_cover.is_round())

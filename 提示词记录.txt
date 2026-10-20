@@ -16,7 +16,7 @@
 4、要支持全局快捷键操作，支持windows自带快捷键（如：播放暂停、上下一曲等等）和自定义快捷键
 5、主要由三个界面：连接服务器页、歌单页、沉浸页，点播放栏的专辑图片可以过渡放大到沉浸页，沉浸页主要显示大封面和歌词
 6、要求界面一体感强，图标风格统一
-7、具体显示内容可参考飞牛音乐的实现，可通过http://192.168.0.116:14040/进行参考，用户名TestWork，密码test1234
+7、具体显示内容可参考飞牛音乐的实现，可通过http://192.168.0.116:5666/进行参考，用户名TestWork，密码qwer1234
 
 最后在根目录创建一个"更新日志.md"每次修改后及时更新内容；在根目录创建一个"项目细节描述.md"并将程序细节总结进去，以便下一个AI能迅速理解并接手程序；在根目录创建"README.md"用于Github展示；在根目录的"提示词记录.txt"中记录我每次对话的提示词输入，以及相应的版本号变化；在"项目细节描述.md"中添加"对以上三个文件都会在后续修改中更新，并正确使用git进行版本管理"的提示，以便后续AI着手修改项目代码后及时更新这四个文件和git
 
@@ -243,3 +243,357 @@
 - 版本号 0.3.1 → **0.3.2**；打包 `Mup-v0.3.2.exe`；同步文档并 git 提交
 
 **版本产出**：v0.3.2
+
+---
+
+## v0.3.3（2026-08-31）—— 启动恢复上次窗口位置
+
+### 对话 19
+
+提示词：通过 git 恢复至 0.3.2 版本吧，然后只改第一点：启动时恢复上次的位置。改完继续（审核 → 版本号/文档 → 打包 → 提交 git）；测试时临时绕过单实例限制。
+
+**处理内容**
+- 只改 [windows.py]：`closeEvent` 保存 `window_pos=[x, y]`；启动 `__init__` 读取并按上次位置 `move` 恢复，位置与任一屏幕无交集时回主屏居中（`_pos_on_screen` / `_center_on_primary`）
+- 测试辅助：[main.py] `MUP_SMOKE=1` 时**跳过单实例检查**（`QSharedMemory`），冒烟测试不再与正在运行的实例冲突，无需关闭用户实例
+- 验证：编译通过；此实例运行中再起冒烟 EXIT=0（单实例被跳过）
+- 版本号 0.3.2 → **0.3.3**；打包 `Mup-v0.3.3.exe`；同步文档并 git 提交
+
+**版本产出**：v0.3.3
+
+---
+
+## v0.3.4（2026-08-31）—— 封面直显 + 主题按钮 + 设置页联动 + 修复下一曲不切歌
+
+### 对话 20
+
+提示词：1、启动时歌单封面应直接显示歌单应该显示的封面（顶部大图不闪服务器封面，直接用本地图）；2、在设置按钮左边加一个切换深色、浅色、跟随的按钮，设置界面切换深浅色跟随的时候缺少选中图标、设置页 UI 也要相应变化；3、明明选的列表循环但自动/手动下一曲都一直停留在当前这首，帮忙查一下。
+
+**处理内容**
+- 封面直显（[cover_manager.py] + [library_page.py]）：封面磁盘缓存 `covers/cache`；头部大图有本地自定义封面时直接显示本地图并打 `set_local_cover` 标记，服务器封面 `loaded` 事件不再覆盖；启动预载上次歌单封面，侧边栏歌单封面列表加载后批量预取
+- 标题栏主题按钮（[windows.py] + [icons.py]）：设置按钮左侧新增 `btn_theme`，点击跟随系统→深色→浅色循环，图标 `auto`/`moon`/`sun` 随模式变化，配置即时保存生效；`WM_NCHITTEST` 命中排除已包含该按钮
+- 设置对话框主题联动：[windows.py] `SettingsDialog` 主题单选加主题色选中圆点（cover 默认样式深色下难辨认）；新增 `_restyle()` 按当前主题刷新背景/卡片/文字/快捷键块/单选标记，`_on_theme` 切换后立即生效
+- 修复下一曲不切歌（[player.py] + [library_page.py]）：根因 `restore()` 将队列设为单曲 `[song]`，长度 1 队列下自动/手动下一曲永远原地循环；改为 `restore(songs, song, pos)` 接收完整歌单列表作队列并定位上次歌曲，恢复后切歌正常
+- 验证：编译通过；冒烟 EXIT=0（`MUP_SMOKE=1` 跳过单实例）；标题栏截图确认主题按钮位于设置按钮左侧
+- 版本号 0.3.3 → **0.3.4**；打包 `Mup-v0.3.4.exe`；同步文档并 git 提交
+
+**版本产出**：v0.3.4
+
+---
+
+## v0.3.5（2026-08-31）—— 边下边播 + 修复媒体键隐藏后不响应
+
+### 对话 21
+
+提示词：有没有办法让它像 QQ 音乐一样在系统卡住/文件管理器卡住的时候仍然能够播放？——用边下边播的形式，本地缓存限制 100MB（约三首歌）；另外 windows 媒体键有时候不会被响应，比如焦点在播放器的时候会响应，一缩小播放器（隐藏到托盘）就不响应。
+
+**处理内容**
+- 边下边播（新增 [app/stream_cache.py] + [app/player.py]）：切歌先下载整首到 `stream_cache/`（上限 100MB 按最旧清理；`.partial` 残留清理且不被当缓存），下载完成用本地文件播放，播放与实时网络解耦；流程：有缓存立即播 → 无缓存下载完播 → 失败降级网络流；后台预取下下一首；启动恢复优先本地缓存；扩展名从 Content-Disposition → 文件头嗅探 → 默认 mp3
+- 修复 `Player.set_client` 未同步 `StreamCache` client（连接建立前下载拿 None 崩溃）
+- 媒体键修复（[app/hotkeys.py] + [ui/windows.py]）：根因媒体键走 WM_APPCOMMAND 只发给前台窗口，隐藏到托盘后收不到 → 改用 `RegisterHotKey` 全局注册媒体键（与焦点无关）+ 冲突失败低级钩子兜底 + 150ms 去重
+- 验证：编译通过；冒烟连续 3 次 EXIT=0；音频缓存下载生成（partial→正式文件流程）
+- 版本号 0.3.4 → **0.3.5**；打包 `Mup-v0.3.5.exe`；同步文档并 git 提交
+
+**版本产出**：v0.3.5
+
+---
+
+## v0.3.5.1（2026-08-31）—— 修复启动崩溃 QByteArray.decode
+
+### 对话 22
+
+提示词：一打开就提示"发生未处理的异常：'PySide6.QtCore.QByteArray' object has no attribute 'decode'"；修正后正常走流程，修 BUG 可只更新到 0.3.5.1。
+
+**处理内容**
+- 根因：[app/stream_cache.py] `_detect_ext` 里 `reply.rawHeader("Content-Disposition")` 在 PySide6 返回 `QByteArray`（无 `.decode()`），v0.3.5 首次完整下载歌曲即崩（打包冒烟 2 秒退出未覆盖该回调）
+- 修复：`bytes(rawHeader(...)).decode(...)`；端到端实跑下载真实歌曲正常落盘 `.mp3`（4.9MB）验证通过
+- 版本号 0.3.5 → **0.3.5.1**；打包 `Mup-v0.3.5.1.exe`；同步文档并 git 提交
+
+**版本产出**：v0.3.5.1
+
+---
+
+## v0.3.6（2026-09-05）—— 开机自启 + 播放全部切列表循环 + 修复媒体键/任务栏最小化
+
+### 对话 23
+
+提示词：1、播放全部的同时改成列表循环；2、windows 媒体键一缩小播放器还是有时候不会被响应，比如焦点在播放器的时候会响应；3、加个开机自启功能及设置开关（任务管理器的启动中可直接限制）；4、任务栏点击时无法最小化；另外帮忙检查和完善一下整个程序。
+
+**处理内容**
+- 播放全部切列表循环（[library_page.py]）：`_play_all` 先 `set_mode(MODE_LIST)` 再播放
+- 媒体键修复（[windows.py] + [hotkeys.py]）：根因 `closeEvent` 每次关闭（含隐藏到托盘）都 `unregister_all()`，托盘运行中热键全被注销 → 改为仅真正退出时注销；LL 钩子回调加 try/except 防异常逃逸进 C 层导致钩子被系统移除
+- 任务栏无法最小化（[windows.py]）：`FramelessWindowHint` 去掉 WS_MINIMIZEBOX → 补 `WindowMinimizeButtonHint`
+- 开机自启（新增 [app/autostart.py] + [windows.py]）：`HKCU\...\Run` 注册表，任务管理器启动页可直接控制；设置对话框新增「开机自启」卡片 + 复选开关（失败回滚）
+- 检查完善：恢复端口默认 14040（此前被 git 回退遗漏，[config.py] + [connect_page.py]）
+- 已知遗留：QMediaPlayer/FFmpeg 启动加载音频偶发原生崩溃（0xC0000409，无 Python 堆栈、低概率、非本次改动引入）
+- 验证：编译通过；冒烟 EXIT=0 多次；开机自启注册表读写实测；SettingsDialog 构建正常
+- 版本号 0.3.5.1 → **0.3.6**；打包 `Mup-v0.3.6.exe`；同步文档并 git 提交
+
+**版本产出**：v0.3.6
+
+---
+
+## v0.3.7（2026-09-18）—— 播放/暂停 3 秒淡入淡出
+
+### 对话 24
+
+提示词：我想要播放/暂停时有三秒淡入淡出效果，记得考虑反复播放暂停时的处理。
+
+**处理内容**
+- 播放/暂停淡入淡出（[app/player.py]）：播放从静音 3 秒线性淡入设定音量；暂停先淡出到静音再真正 `media.pause()`（`_fade_pending_pause` 标记，避免声音戛然而止）
+- 实现：`QTimer`（30ms 节拍）+ `time.monotonic()`；`_fade_tick` 线性插值 `audio.setVolume`
+- 反复快速切换：淡化进行中按播放/暂停直接反向渐变，从当前音量续接（`_fade_start_level = audio.volume()`）不跳变；淡出中途按播放取消暂停淡回
+- 切歌/调音量/停止/恢复路径 `_cancel_fade(restore_volume=True)` 恢复设定音量，防止淡出后音量滞留 0
+- 验证：`_fade_test.py` 7 项断言全过（淡入/半程/3s 停表/淡出 pending/淡出归零/反复切换无跳变/set_volume 取消）；冒烟 EXIT=0 多次；测试产物已删除
+- 版本号 0.3.6 → **0.3.7**；打包 `Mup-v0.3.7.exe`；同步文档并 git 提交
+
+**版本产出**：v0.3.7
+
+---
+
+## v0.3.7.1（2026-09-18）—— 修复连接后歌单不更新
+
+### 对话 25
+
+提示词：连接后歌单不会更新，多个歌单也不会，帮忙检查一下什么问题，有需要的话可以在测试账号上随便弄几个测试歌单来测（后续：可用真实账号只读测试，涉及服务端写操作时用 TestWork）。
+
+**排查结论**
+- server 层正常：真实账号 `getPlaylists` 返回 10 个歌单，TestWork 建多个歌单后解析也全部正常；首启链路完整实例化 `MainWindow` 侧边栏模型 10 个歌单全部加载，UI 截图确认主题/布局无任何改动
+- 根因在「刷新机制」：`refresh_playlists()` 只在 `LibraryPage` 首次创建时调用一次——重新连接不刷新、服务器增删歌单没有任何入口让侧边栏歌单列表更新
+
+**处理内容**
+- 修复（[ui/windows.py] + [ui/pages/library_page.py]，纯数据层，不碰 UI 样式）：
+  - `_on_connected`：`_library` 已存在时调用 `set_client(client)` + `refresh_playlists()` 重新拉取歌单列表
+  - 新增 `LibraryPage.set_client(client)`：更新 client 引用 + 清空 `_playlist_cache`
+  - `_reload_playlist`（顶部「重新加载」按钮）：先 `refresh_playlists(preserve_current=True)` 刷新侧边栏歌单列表，再强刷当前歌单，不打断当前打开的歌单
+- 验证：真实账号模拟「重新连接」后歌单列表保持 10 个并恢复上次歌单；TestWork 新建歌单后手动刷新 4 → 5 个且新歌单进入侧边栏；TestWork 测试歌单已全部清理
+- 版本号 0.3.7 → **0.3.7.1**；打包 `Mup-v0.3.7.1.exe`；同步文档并 git 提交
+
+**版本产出**：v0.3.7.1
+
+---
+
+## v0.3.8（2026-09-18）—— 「我喜欢」置顶 + 双击标题栏最大还原 + 歌单刷新按钮
+
+### 对话 26
+
+提示词：1、帮忙针对"我喜欢"歌单将其特别放置在第一位；2、现在无法缩放窗口了；3、标题栏希望能双击最大最小化，但不要改UI实现，只要能检测按键操作和响应最大化/窗口化的功能就行；4、最大化后按键未变化成窗口化；5、我的歌单旁帮忙加个刷新按钮。
+
+**排查结论**
+- 边缘缩放命中逻辑本身正确（WM_NCHITTEST 单测：上/右/下/右下角等 6 点全对）——「无法缩放」的真根因是**最大化后无法还原**：无边框窗口系统默认不响应标题栏双击还原，最大化后只能靠窗口按钮退出，边缘缩放自然失效，形成"出不来"死局
+- 第 3/4 条同源：原生事件层补 `WM_NCLBUTTONDBLCLK` 显式处理即可
+
+**处理内容**
+- 标题栏双击最大化↔窗口化（[ui/windows.py]）：`_NativeFilter` 处理 `WM_NCLBUTTONDBLCLK`，wParam==HTCAPTION 时调用 `_toggle_max()` 并拦截；纯功能，不动 UI 样式；内容区双击不处理
+- 「我喜欢」置顶（[ui/pages/library_page.py]）：`_on_playlists_loaded` 加载/刷新时按名称匹配「我喜欢」排第一，其余保持服务器顺序
+- 「我的歌单」旁刷新按钮（[ui/pages/library_page.py]）：标题行右侧 22px 刷新按钮 → `refresh_playlists(preserve_current=True)`（停留在当前歌单）
+- 验证：构造消息单测——双击标题栏最大→还原→内容区双击不响应 3 项 PASS；真实账号第一位「我喜欢」；刷新按钮存在可点击触发
+- 版本号 0.3.7.1 → **0.3.8**；打包 `Mup-v0.3.8.exe`；同步文档并 git 提交
+
+**版本产出**：v0.3.8
+
+提示词：你是一个专业的 Python 开发 AI，首先通过相关文档如"项目细节描述.md"了解项目，然后以你的专业见解对该项目进行全面功能测试找BUG和给出优化建议，以及给出项目改进建议（性能、体验、windows适配性等）
+
+**测试方式**
+- 全量静态审查 13 个源文件（app/ 8 个 + ui/ 4 个 + 3 个页面）
+- 13 个离屏运行时探针（本地慢速 HTTP 服务端、真实 WAV 媒体、假 Subsonic 服务端）
+- 冒烟 MUP_SMOKE=1
+
+**Stage1 修复（v0.3.8.1）：三处高危缺陷**
+- [ui/windows.py] 新增 `_shutdown_background()`：先置 `STOP_EVENT` → 等待 PingThread → connect_page/library/lyrics 的 `shutdown()` → `client.close()`；退出分支先 `hide()` 再回收。根因：QThread 运行中被父对象析构 → Qt qFatal → 进程 0xC0000409（实测 300ms 退出必崩）
+- [app/subsonic_client.py] 新增 `STOP_EVENT`/`request_stop()`/`close()`，长循环检查停止位；超时 15s/25s → `TIMEOUT=(5,12)`
+- [app/stream_cache.py] `_prune()` 只删除不在 `_pending` 的 `.partial`。根因：切歌必然两路并发下载，后完成者删掉前者正在写的 .partial → 当前播放曲缓存被截断（实测只剩 65536/2097152 字节）
+- [app/lyrics.py] `LyricsWorker.result` 改为 `Signal(str, object)` 携带本线程实际请求的 song_id；[ui/pages/library_page.py] `_on_lyrics_loaded` 增加消费端 song_id 守卫。根因：旧 worker 结果被用"当前歌曲 id"标注 → 实测收到 ('B', A的歌词)
+- [ui/pages/library_page.py] `_clean_thread` 补 `deleteLater()`（残留 DataThread 对象 3 → 0）；新增 `shutdown()`
+
+**Stage1 验证**
+- 退出崩溃：修复前 300ms → exit=-1073740791；修复后 300/600/1200/3000ms 全部 exit=0（退出瞬间确有 1~2 线程运行）
+- 缓存截断：2MB 音频三路并发，修复前 65536 字节，修复后三路均 2097152 字节
+- 歌词竞态：修复前 [('B',B歌词),('B',A歌词)]，修复后仅 [('B',B歌词)]
+- 慢速服务端 shutdown() 耗时 2.5s，分页循环第 10 页被提前中断
+- 回归：15 模块导入 + 5 类分页 + 6 种排序 + 3 页面构造 + 线程回收 全通过；MUP_SMOKE 冒烟 exit=0
+
+**版本产出**：v0.3.8.1
+
+**Stage2 修复（v0.3.8.2）**
+- 用户补充：中4 点击区域要能点到下层列表，但渐变效果必须保留（就是要用歌词覆盖一部分列表）→ 用 WA_TransparentForMouseEvents 实现穿透，不动绘制与几何
+- [ui/pages/library_page.py] MiniLyrics 加鼠标穿透；新增 _view_token 视图意图令牌并守卫 9 个异步回调；load_playlist 增加 play_after 参数替代布尔意图标记
+- [app/player.py] 恢复进度改为 _pending_position + LoadedMedia/BufferedMedia 时应用，_prepare 切歌清空
+
+**Stage2 验证**
+- MiniLyrics：穿透=True、几何不变 x:16 y:438 w:1048 h:46、childAt 由 MiniLyrics 变为下层 QWidget
+- 恢复进度：30s WAV restore(12000) → position=12000、PausedState（修复前恒为 0）
+- 双击失败后单击同一歌单：_play_all 触发 0 次（修复前 1 次），意图被清空
+- 慢收藏(1.2s)后立刻切最近播放：最终显示「最近播放/最近曲」，迟到结果被丢弃
+- 回归 5 项 + 冒烟 + 300ms 退出路径 全通过
+
+**版本产出**：v0.3.8.2
+
+**Stage4 改进（v0.3.9）**
+- 用户需求1：搜索框放在侧边栏顶部，快捷键将焦点移动到输入框，并完善搜索框体验
+  → [ui/pages/library_page.py] 侧边栏最顶部 NeuLineEdit（左内嵌搜索图标+清除按钮）；_search_debounce 300ms 防抖；_run_search/_on_search_loaded 复用歌曲列表视图；_exit_search/_cancel_search_silently 退出策略；[ui/windows.py] Ctrl+F → _focus_search（沉浸页也可用）
+- 用户需求2：歌曲封面单击放大时，放大动画和背景渐变出现动画一起进行
+  → [ui/windows.py] _open_immersive 在启动过渡层前就切沉浸页并 fade_in，_finish_open 只负责淡出过渡层
+
+**Stage4 验证**
+- 搜索框 y=12 位于侧边栏最顶部（nav_home y=58）；focus_search 后 hasFocus=True
+- 逐字输入 3 字请求数 0 → 停顿后 1 次 ['周杰伦']；meta「4 首 · 专辑 1 · 歌手 1」
+- 改写关键词后展示最新结果；Esc 后清空输入并恢复搜索前的「收藏」视图
+- 搜索中点导航 → 静默退出并显示「最近播放」
+- 动画事件顺序 ['fade_in','overlay_start']，间隔 0.0ms（修复前 320ms）
+- 回归 5 项 + 冒烟 + 400ms 退出路径 全通过
+
+**版本产出**：v0.3.9
+
+**Stage3 修复+优化（v0.3.9.1）**
+- 修复「重新加载」失效：[ui/pages/library_page.py] _on_fast_result 的 full_now 判断含 _playlist_cache，force=True 时同样命中 → 跳过全量段；现把 force 透传进 _on_fast_result
+- 修复「重新加载」重复加载：refresh_playlists 新增 reload_songs 参数，_reload_playlist 只调一次（4 次 getPlaylistSongs → 2 次）
+- 性能：封面预取分片（_cover_prefetch_timer 每轮 8 个）、重绘合并（_cover_repaint_timer）、
+  _anim_timer 加 _should_animate() 约束、_update_hover 变化才重绘、
+  [ui/widgets.py] song_zone 复用 _ARTIST_FM、_playlist_cache 加 MAX_PLAYLIST_CACHE=10
+
+**Stage3 验证（7 项全过）**
+- 重新加载：getPlaylists 1 次，getPlaylistSongs ['jf=False','jf=True'] 各 1 次（修复前 4 次）
+- 分片预取：单次 8 个约 5~9ms，队列 64→56
+- 重绘合并：50 次封面 loaded → 整视口重绘 1 次（修复前 50）
+- 律动定时器：歌曲视图 True，切专辑视图自动 False
+- 悬浮：同位置重复 10 次 → viewport.update 0 次（修复前 10）
+- song_zone：0.0123ms/次，字体度量已缓存
+- 歌单缓存：连续缓存 30 个 → 保留 10 个
+- Stage2/Stage4 复跑全过；回归 5 项 + 冒烟 + 300ms 退出路径全过
+
+**版本产出**：v0.3.9.1
+
+提示词：好的，帮忙打包一下
+
+**打包（v0.3.9.1）**
+- 新增 Mup-v0.3.9.1.spec（复制 v0.3.8，仅改 name='Mup-v0.3.9.1'；四段版本号用点分隔，与 v0.3.7.1 一致）
+- python -m PyInstaller --noconfirm Mup-v0.3.9.1.spec → dist/Mup-v0.3.9.1.exe（57.8MB，单文件）
+- 验证：MUP_SMOKE=1 运行 exe → 退出码 0；全程 7.2s（onefile 解压约 5s + 2s 冒烟计时）；
+  运行期间进程存活、主窗口构造完成（closeEvent 内的 config.save() 被触发即证明走完启动→退出全流程）；
+  dist/config.json 内容字节级未变（仅 mtime 被 touch，写入内容一致）
+
+**同步修正文档中的过期描述**
+- [项目细节描述.md] 「打包目标：PyInstaller（暂未配置 spec）」→ 已配置单文件打包
+- [项目细节描述.md] 已知限制第 4 条「未配置 PyInstaller 打包」→ 已配置，并说明 build/dist/*.spec 均在 .gitignore
+- [项目细节描述.md] 已知限制第 1 条「搜索入口已从侧边栏移除」→ 更正为侧边栏顶部搜索框（v0.3.9 已加回）
+- [项目细节描述.md] 已知限制第 3 条「封面仅内存缓存」→ 更正为内存 LRU + 磁盘缓存
+- [项目细节描述.md] 新增第 6 条：原生命中检测按 100% 缩放编写，缩放环境下未实测
+- [项目细节描述.md] 第八节新增「打包约定」：发版流程、验证命令、gitignore 说明
+
+**版本产出**：v0.3.9.1（Mup-v0.3.9.1.exe）
+
+提示词：1、帮忙给出在保持性能占用低的前提下给UI提升质感提升用户体验方案，特别是小动效；2、我希望软件获得操作焦点的时候周围会出现一层阴影；3、我希望侧边栏可以手动调整右侧边缘；4、渐变动画过程中，会在动画过程和动画目标处同时出现两个封面，想办法让动画完毕后再替换；5、左下角字号再大一些，设计规范间距要做好；6、播放页的进度条没用；7、暂停按钮图标更新不及时
+（后续追问）有副作用，里面的拟态UI直接整体变样了
+（用户决定）阴影数值保持原样；另外想办法做窗口阴影，没办法就不做；焦点阴影只在聚焦时出现
+
+**第 2/3/5/6/7 条处理**
+- [ui/windows.py] 新增 _paint_focus_glow()：四边内侧 14px 由外向内 shadow_dark 渐变带，
+  changeEvent(ActivationChange) → _animate_focus_glow() 160ms 过渡；FOCUS_GLOW_IDLE=0.0（失焦不画）；最大化不画
+- [ui/pages/library_page.py] 新增 SidebarResizer（压在侧边栏右缘的覆盖条，8px 热区、SizeHorCursor），
+  set_sidebar_width/save_sidebar_width/_layout_sidebar_handle；范围 180~360，松手落盘 config.player.sidebar_width
+- [ui/pages/library_page.py] 播放栏左下角：歌名 12pt(16px body-md)/行高24、歌手 10.5pt(14px label-md)/行高20、
+  间距 4px(xs)、文字块垂直居中；内边距 16px 栅格（左=下=16），加 b.addStretch(1) 使封面左留白==底留白
+- [ui/pages/player_page.py] 补 progress.valueChanged → player.seek（此前漏连，沉浸页进度条只能显示）
+- [app/player.py] 状态改为反映用户意图：pause()/play() 立即上报 + _emit_state() 去重 + state() 访问器
+
+**第 4 条（我上一轮引入的回归）**
+- [ui/windows.py] _open_immersive 过渡前 big_cover.hide()，_finish_open 再 show()，
+  修掉"过渡层封面 + 目标位置封面"同框；同时性（内容渐显与封面放大一起）保留
+
+**主要发现（用户反馈"拟态UI整体变样"的根因）**
+- [ui/widgets.py] _q() 对 QColor 入参原样返回，而 _paint_inset_shadow 会 setAlpha(alpha*0.8)
+  → 调色板 shadow_dark/shadow_light 被原地修改，每画一次内凹面就 ×0.8
+  → 实测 5 次内凹绘制 160→51、真实页面每重绘一次 51→12，整套新拟态阴影衰减到近 0
+- 修复：_q() 始终 QColor(c) 返回副本；调色板数值不变（深色 160/46、浅色 120/210）
+- 即：用户平时看到的是"衰减后的扁平态"，修复后恢复设计稿原始强度且恒定
+
+**窗口外阴影实测（结论：不做）**
+- DwmExtendFrameIntoClientArea(MARGINS(1,1,1,1)/(0,0,1,0)/(-1,-1,-1,-1)) 返回 S_OK 但
+  DWMWA_EXTENDED_FRAME_BOUNDS 相对 GetWindowRect 无任何外围扩展
+- SetClassLongW(GCL_STYLE, CS_DROPSHADOW) 经屏幕抓取比对，窗口外亮度变化 0.0
+- 两条低成本原生路径都拿不到，按用户约定不做
+
+**验证**
+- 第2条：聚焦上边缘亮度 13（内侧26）；失焦边缘与内侧完全相同 26/26（差 0）
+- 第3条：204→+60→264；-400→夹到180；+1000→夹到360；拖拽条始终贴右缘；config 写入 360
+- 第4条：动画期间 6 次采样 big_cover 全隐藏、结束后显示、切页即时
+- 第5条：字号 12/10.5pt、行高 24/20、间距 4px、封面左留白16==底留白16
+- 第6条：拖动到 30000ms → player.seek 收到 30000，media.position()=30000
+- 第7条：pause() 0.0ms 上报 PAUSED（media 仍 Playing）；淡出 3s 后无重复上报；play() 0.0ms 上报 PLAYING
+- 总回归 10 项 + 冒烟 全通过
+
+**版本产出**：v0.3.10
+
+提示词：按你说的做吧，从A组开始做，B组除了B1不做其他都做，C组暂时不做
+1、我想参考 https://github.com/Raduap/FN-Music-Apple 实现直连飞牛音乐，并且要考虑互联网加载情况，因为我想通过FNID来实现非局域网使用，同时可以参考一下这个应用可以借鉴的地方
+2、我想提升应用使用体验，在保证体验流畅度的情况下，提升应用的整体性能，如渲染性能、加载速度等，然后看看那些地方可以加些动效之类的，比如点击的时候按下会有缩小动画，松开会有恢复动画
+
+**动效（A组 + B组除B1）**
+- 新增 [ui/anim.py]：全局单 ticker（空闲自停）、Motion 过渡量、ease/mix 工具、set_reduced_motion
+- [ui/widgets.py] 新增 MotionButton 基类：NeuButton/NeuIconButton/SkipButton/PlayButton/NavItem 全部继承；
+  按下缩小 0.94 + 位移、松开回弹、悬浮颜色插值；PlayButton 悬浮放大 1.04
+- A2 ListEdgeFade 列表缘渐隐；A3 HoverSlider 拖动点缩放浮现；A4 显示值缓动（拖动 ease=False 严格跟手）
+- B2 FadeVeil 视图淡入；B3 占位封面扫光；B4 SongDelegate 逐行入场
+- [app/config.py] 新增 ui.reduce_motion；[ui/windows.py] 设置页「减少动效」开关 + 启动应用
+
+**性能**
+- [ui/icons.py] pixmap() 加 lru_cache（QSvgRenderer 单次约 0.4ms，paint 路径内必须缓存）
+- [ui/widgets.py] 占位封面底图预渲染缓存 → 60 瓦片整帧 68.1ms → 44.6ms → 33.6ms
+- 实测：按压过渡每按钮每帧多 0.12ms（60fps 约 1.5% 单核）；列表卡片不做逐帧阴影重算；静止 0 定时器
+
+**踩坑（第一版就被自己的验证抓到）**
+- 扫光最初对所有占位都请求重绘 → 无 cover_id（永远不会来封面）的行会永久 60fps 刷新、且把全局 ticker 卡住
+  修复：_can_shimmer() 要求有 cover_id 且未被 CoverManager.is_failed 标记；tick 内异常只剔除条目
+- 专辑网格扫光实测 45ms/帧会吃满一核 → 该处关闭扫光（列表保留）
+
+**FN 直连调研（后台 agent，只读）**
+- Raduap/FN-Music-Apple 确实存在，但是 Electron+React 桌面播放器（不是 Swift），直连飞牛私有 API /music/api/v1
+- 鉴权：Cookie: music-token + 每请求 authx: nonce/timestamp/sign（sign=md5(前缀_pathname_nonce_ts_payload_密钥)）
+- 登录：POST /api/v1/user/password-login {username, password: sha256(明文), deviceId} → data.userToken/deviceId
+- 也可走 NAS 账号 OAuth：GET /api/v1/sys/config → data.nasOAuth，浏览器授权拿 code → POST /api/v1/user/auth-login
+- 列表/详情/搜索/歌词/流/封面接口均已拿到（track/stream?guid= 支持 Range；static/cover?coverId=&size=）
+- **该 App 并未实现 FNID**，只支持手填地址；FNID 是飞牛官方 FN Connect 的设备标识，
+  FNID→地址解析、中继/P2P 握手与鉴权**无公开文档**（仅社区证实中继走 WebSocket 443/TLS + Cookie: mode=relay，疑似）
+- 结论：局域网/公网/DDNS 直连可复刻；FNID 互联网访问需抓包或用户提供账号实测，公开资料不足
+
+**版本产出**：v0.3.11
+
+---
+
+## v0.3.12（2026-10-19）—— 修复暂停图标滞后、暂停不生效
+
+### 对话
+
+提示词：现在运行的实例暂停按钮没用，快捷键也没用，图标有变但不及时（没有立刻变，正常来说要立刻变，而不是渐变后才变），而且歌曲也没有暂停。
+（补充）我希望的是暂停图标立刻变化，声音两秒淡出。
+
+**处理内容**
+- 根因：v0.3.7「播放/暂停 3 秒淡入淡出」让暂停要等淡出结束才真正 `media.pause()`，图标与声音都滞后；未缓存歌曲下载完成后 `_on_downloaded` 直接 `media.play()`，会覆盖用户刚按的暂停
+- `pause()` 立即上报 `PAUSED`（图标同帧切换），声音按新增 `FADE_OUT_MS = 2000` 淡出后再 `media.pause()`；播放淡入仍为 3 秒
+- `toggle()` 改为按用户意图 `state()` 判断；新增 `_intent_play`，`_on_downloaded` 尊重暂停意图（只加载不播放）；`stop()` 显式上报 `STOPPED`；暂停淡出中调音量不打断淡出
+- 静音 WAV 实测：按暂停同帧变 `paused`、音量约 2.0s 归零后进入 `PausedState`；再按播放同帧变 `playing` 并平滑淡入
+- 版本号 0.3.11 → **0.3.12**；打包 `Mup-v0.3.12.exe`；同步文档并 git 提交
+
+**版本产出**：v0.3.12
+
+---
+
+## v0.3.13（2026-10-19）—— 彻底修复拟态阴影变粗
+
+### 对话
+
+提示词：等等，问题很大，拟态的阴影变粗了，这个问思似乎在之前给应用增加窗口阴影的时候也出现过。
+（补充）具体现象就是 0.3.2效果图.png 和 0.3.3效果图.png 的对比，这个问题出过很多次了，麻烦彻底搞清楚原因和解决方法。
+
+**根因**
+- 拟态阴影＝6 层硬偏移半透明圆角矩形叠加，观感完全由 `shadow_dark/shadow_light` 的 alpha 决定。
+- 早期 `_q()` 对 QColor 原样返回，内凹面每次绘制把调色板 alpha ×0.8，阴影随运行时间衰减；`0.3.2效果图` 是衰减后的柔和值（顶 27→38 / 底 19→25）。
+- v0.3.10 修复衰减后，阴影固定在满强度（深色 160/46），即 `0.3.3效果图` 的粗重值（顶 37→144 / 底 1→6）；同版本又加了 14px 窗口聚焦边缘阴影，叠加后更粗更黑。
+
+**处理内容**
+- `ui/theme.py`：深色 `shadow_dark 160→20`、`shadow_light 46→4`；浅色 `120→24`、`210→153`（DESIGN.md：白光 60% + 暗影 8%），并写明"勿随手调大"。
+- `ui/windows.py`：`FOCUS_GLOW_ACTIVE = 0.0`，关闭窗口聚焦边缘阴影。
+- 离屏渲染扫描 alpha：`dark=20/light=4` 与 0.3.2 效果图逐像素一致（误差 0）；实际应用截图顶边 `[27,28,30,32,35,38,38]`、底边 `[19,19,21,22,23,24,25]`，窗口左缘无暗带。
+- 版本号 0.3.12 → **0.3.13**；打包 `Mup-v0.3.13.exe`；同步四份文档并 git 提交。
+
+**版本产出**：v0.3.13

@@ -5,7 +5,7 @@ from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
-from app.config import Config
+from app.config import Config, SHUTDOWN_WAIT_MS
 from app.subsonic_client import SubsonicClient
 from ui import icons, theme
 from ui.widgets import NeuButton, NeuFrame, NeuLineEdit
@@ -92,7 +92,7 @@ class ConnectPage(QWidget):
 
         srv = self.config.server
         self.host = NeuLineEdit(srv.get("host", ""), "例如 192.168.0.116")
-        self.port = NeuLineEdit(str(srv.get("port", 14040)), "端口")
+        self.port = NeuLineEdit(str(srv.get("port", 14040)), "14040")
         self.user = NeuLineEdit(srv.get("username", ""), "用户名")
         self.pwd = NeuLineEdit(srv.get("password", ""), "密码", password=True)
 
@@ -147,7 +147,7 @@ class ConnectPage(QWidget):
     def _on_connect(self) -> None:
         host = self.host.text().strip()
         try:
-            port = int(self.port.text().strip() or 14040)
+            port = int(self.port.text().strip() or 5666)
         except ValueError:
             self._show_status("端口格式不正确", error=True)
             return
@@ -168,7 +168,7 @@ class ConnectPage(QWidget):
         if ok:
             srv = self.config.server
             srv["host"] = self.host.text().strip()
-            srv["port"] = int(self.port.text().strip() or 14040)
+            srv["port"] = int(self.port.text().strip() or 5666)
             srv["username"] = self.user.text().strip()
             srv["password"] = self.pwd.text()
             self.config.save()
@@ -183,3 +183,11 @@ class ConnectPage(QWidget):
         color = pal["ok"] if ok else (pal["danger"] if error else pal["text_muted"])
         self.status.setStyleSheet(f"color: {color};")
         self.status.setText(text)
+
+    def shutdown(self) -> None:
+        """退出前回收连接验证线程（QThread 运行中被析构会让进程崩溃）。"""
+        ping = self._ping
+        self._ping = None
+        if ping is not None and ping.isRunning():
+            ping.requestInterruption()
+            ping.wait(SHUTDOWN_WAIT_MS)

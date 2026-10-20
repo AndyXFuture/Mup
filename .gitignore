@@ -5,5 +5,9 @@ build/
 dist/
 *.spec
 config.json
+# 运行时封面缓存 + 本地自定义封面（用户数据，不入库）
+covers/
+# 边下边播音频缓存（用户数据，不入库）
+stream_cache/
 .venv/
 venv/

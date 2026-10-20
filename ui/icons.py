@@ -1,5 +1,13 @@
-"""统一线性图标库：stroke 风格 SVG，可指定颜色与尺寸，保持图标风格一致。"""
+"""统一线性图标库：stroke 风格 SVG，可指定颜色与尺寸，保持图标风格一致。
+
+渲染结果按 (图标名, 颜色, 尺寸, 线宽) 缓存 —— QSvgRenderer 解析+渲染单次约 0.4ms，
+而图标大量出现在 paint 路径（列表委托每帧、占位封面扫光每帧），
+不缓存会把绘制成本放大几十倍（实测 60 个占位瓦片一帧 68ms → 缓存后个位数）。
+调用方**只读**返回的 pixmap，不要在其上作画。
+"""
 from __future__ import annotations
+
+from functools import lru_cache
 
 from PySide6.QtCore import QByteArray, Qt
 from PySide6.QtGui import QIcon, QPainter, QPixmap
@@ -42,6 +50,10 @@ ICON_PATHS: dict[str, str] = {
     "maximize": '<rect x="5" y="5" width="14" height="14" rx="2"/>',
     "minimize": '<path d="M5 12h14"/>',
     "close": '<path d="M6 6l12 12M18 6L6 18"/>',
+    # —— 外观主题 ——
+    "sun": '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5 5l1.8 1.8M17.2 17.2L19 19M19 5l-1.8 1.8M6.8 17.2L5 19"/>',
+    "moon": '<path d="M20 13.5A8.5 8.5 0 1 1 10.5 4a7 7 0 0 0 9.5 9.5z"/>',
+    "auto": '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 0 0 17z" fill="@FILL@" stroke="none"/>',
 }
 
 
@@ -61,9 +73,14 @@ def _render_pixmap(name: str, color: str, px: int, stroke: float = 1.9) -> QPixm
     return pix
 
 
+@lru_cache(maxsize=512)
+def _cached_pixmap(name: str, color: str, px: int, stroke: float) -> QPixmap:
+    return _render_pixmap(name, color, px, stroke)
+
+
 def icon(name: str, color: str, px: int = 22, stroke: float = 1.9) -> QIcon:
-    return QIcon(_render_pixmap(name, color, px, stroke))
+    return QIcon(_cached_pixmap(name, color, px, stroke))
 
 
 def pixmap(name: str, color: str, px: int = 22, stroke: float = 1.9) -> QPixmap:
-    return _render_pixmap(name, color, px, stroke)
+    return _cached_pixmap(name, color, px, stroke)
