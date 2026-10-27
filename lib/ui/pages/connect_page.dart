@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../core/app_controller.dart';
+import '../components/controls.dart';
 import '../components/glass_panel.dart';
 import '../theme.dart';
 
@@ -39,7 +40,7 @@ class _ConnectPageState extends State<ConnectPage> {
 
   Future<void> _connect() async {
     FocusScope.of(context).unfocus();
-    final port = int.tryParse(_port.text.trim()) ?? 14040;
+    final port = int.tryParse(_port.text.trim()) ?? 0;
     await widget.controller.connect(
       _host.text,
       port,
@@ -66,6 +67,16 @@ class _ConnectPageState extends State<ConnectPage> {
               children: [
                 Row(
                   children: [
+                    if (widget.controller.canCancelConnect) ...[
+                      MupIconButton(
+                        icon: LucideIcons.arrowLeft,
+                        size: 36,
+                        iconSize: 17,
+                        tooltip: '返回设置',
+                        onTap: widget.controller.cancelConnect,
+                      ),
+                      const SizedBox(width: 12),
+                    ],
                     SizedBox(
                       width: 42,
                       height: 42,
@@ -155,7 +166,9 @@ class _ConnectPageState extends State<ConnectPage> {
                       GestureDetector(
                         onTap: () => setState(() => _protocol = protocol),
                         child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 170),
+                          duration: MediaQuery.of(context).disableAnimations
+                              ? Duration.zero
+                              : const Duration(milliseconds: 170),
                           margin: const EdgeInsets.only(left: 6),
                           padding: const EdgeInsets.symmetric(
                               horizontal: 10, vertical: 6),
@@ -179,6 +192,13 @@ class _ConnectPageState extends State<ConnectPage> {
                       ),
                   ],
                 ),
+                if (_protocol == 'http') ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'HTTP 不会加密登录凭据；公网连接请启用 HTTPS。',
+                    style: TextStyle(color: theme.dim, fontSize: 10.5),
+                  ),
+                ],
                 if (widget.controller.connectError != null) ...[
                   const SizedBox(height: 14),
                   Text(

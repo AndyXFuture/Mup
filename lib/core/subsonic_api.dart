@@ -8,7 +8,9 @@ import 'app_config.dart';
 import 'models.dart';
 
 class SubsonicApi {
-  SubsonicApi(this.config) {
+  SubsonicApi(this.config, {HttpClient? httpClient})
+      : _http = httpClient ?? HttpClient() {
+    _http.connectionTimeout = const Duration(seconds: 5);
     final salt = _randomSalt();
     _auth = {
       'u': config.username,
@@ -21,8 +23,7 @@ class SubsonicApi {
   }
 
   final AppConfig config;
-  final HttpClient _http = HttpClient()
-    ..connectionTimeout = const Duration(seconds: 5);
+  final HttpClient _http;
   late final Map<String, String> _auth;
   String? _jellyfinToken;
   String? _jellyfinUserId;
@@ -56,9 +57,9 @@ class SubsonicApi {
     final request = await _http.getUrl(uri).timeout(timeout);
     request.headers.set(HttpHeaders.userAgentHeader, 'mup-flutter/0.1');
     final response = await request.close().timeout(timeout);
-    final text = await utf8.decoder.bind(response).join();
+    final text = await utf8.decoder.bind(response).join().timeout(timeout);
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw HttpException('HTTP ${response.statusCode}', uri: uri);
+      throw HttpException('HTTP ${response.statusCode}');
     }
     final decoded = jsonDecode(text);
     if (decoded is! Map<String, dynamic>) {
@@ -87,33 +88,70 @@ class SubsonicApi {
     return [...favorites, ...others];
   }
 
-  Future<List<Song>> getPlaylistSongs(
+  Future<PlaylistSongsResult> getPlaylistSongs(
     String playlistId, {
     bool complete = true,
   }) async {
-    final body = await _get(
-      'getPlaylist.view',
-      parameters: {'id': playlistId, 'offset': '0', 'count': '2000'},
-    );
-    final node = body['playlist'] as Map? ?? const {};
-    final songs = asList(node['entry'])
-        .whereType<Map>()
-        .map((entry) => Song.fromNode(Map<String, dynamic>.from(entry)))
-        .where((song) => song.id.isNotEmpty)
-        .toList();
-    final reported = int.tryParse(node['songCount']?.toString() ?? '') ?? 0;
-    if (!complete || reported <= songs.length) return songs;
+    const pageSize = 500;
+    final songs = <Song>[];
+    final seenPages = <String>{};
+    var reported = 0;
+    var offset = 0;
+    while (offset < 20000) {
+      final body = await _get(
+        'getPlaylist.view',
+        parameters: {
+          'id': playlistId,
+          'offset': '$offset',
+          'count': '$pageSize',
+        },
+      );
+      final node = body['playlist'] as Map? ?? const {};
+      if (reported == 0) {
+        reported = int.tryParse(
+              (node['songCount'] ?? node['@songCount'])?.toString() ?? '',
+            ) ??
+            0;
+      }
+      final page = asList(node['entry'])
+          .whereType<Map>()
+          .map((entry) => Song.fromNode(Map<String, dynamic>.from(entry)))
+          .where((song) => song.id.isNotEmpty)
+          .toList();
+      if (page.isEmpty) break;
+      final signature = page.map((song) => song.id).join('\u0001');
+      if (!seenPages.add(signature)) break;
+      songs.addAll(page);
+      if (!complete) break;
+      if (reported > 0) {
+        if (songs.length >= reported) break;
+      } else if (page.length < pageSize) {
+        break;
+      }
+      offset += page.length;
+    }
+    final total = reported > 0 ? reported : songs.length;
+    if (!complete || reported <= songs.length) {
+      return PlaylistSongsResult(songs: songs, totalCount: total);
+    }
     final full = await _getJellyfinPlaylist(playlistId);
-    return full.length > songs.length ? full : songs;
+    if (full != null && full.length > songs.length) {
+      return PlaylistSongsResult(
+        songs: full,
+        totalCount: max(reported, full.length),
+      );
+    }
+    return PlaylistSongsResult(songs: songs, totalCount: total);
   }
 
-  Future<List<Song>> _getJellyfinPlaylist(String playlistId) async {
+  Future<List<Song>?> _getJellyfinPlaylist(String playlistId) async {
     try {
       if (_jellyfinToken == null || _jellyfinUserId == null) {
         final credentials = await _jellyfinLogin();
-        if (credentials == null) return const [];
+        if (credentials == null) return null;
       }
       final songs = <Song>[];
+      final seen = <String>{};
       var start = 0;
       while (start < 20000) {
         final uri = Uri.parse('$root/Playlists/fnm-playlist-$playlistId/Items')
@@ -122,30 +160,41 @@ class SubsonicApi {
           'StartIndex': '$start',
           'Limit': '200',
         });
-        final request = await _http.getUrl(uri);
+        final request =
+            await _http.getUrl(uri).timeout(const Duration(seconds: 12));
         request.headers.set('X-Emby-Token', _jellyfinToken!);
-        final response = await request.close();
-        final text = await utf8.decoder.bind(response).join();
-        if (response.statusCode < 200 || response.statusCode >= 300) break;
+        final response =
+            await request.close().timeout(const Duration(seconds: 12));
+        final text = await utf8.decoder
+            .bind(response)
+            .join()
+            .timeout(const Duration(seconds: 12));
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          return null;
+        }
         final body = jsonDecode(text) as Map<String, dynamic>? ?? const {};
         final items = asList(body['Items']).whereType<Map>().toList();
         if (items.isEmpty) break;
-        songs.addAll(items
-            .map((item) => _jellyfinSong(Map<String, dynamic>.from(item))));
+        final before = songs.length;
+        for (final item in items) {
+          final song = _jellyfinSong(Map<String, dynamic>.from(item));
+          if (song.id.isNotEmpty && seen.add(song.id)) songs.add(song);
+        }
         final total = (body['TotalRecordCount'] as num?)?.toInt() ?? 0;
         start += items.length;
-        if (items.length < 200 || (total > 0 && songs.length >= total)) break;
+        if (songs.length == before || (total > 0 && start >= total)) break;
       }
       return songs.where((song) => song.id.isNotEmpty).toList();
     } catch (_) {
-      return const [];
+      return null;
     }
   }
 
   Future<(String, String)?> _jellyfinLogin() async {
     try {
-      final request =
-          await _http.postUrl(Uri.parse('$root/Users/AuthenticateByName'));
+      final request = await _http
+          .postUrl(Uri.parse('$root/Users/AuthenticateByName'))
+          .timeout(const Duration(seconds: 12));
       request.headers.contentType = ContentType.json;
       request.headers.set(
         HttpHeaders.authorizationHeader,
@@ -155,8 +204,12 @@ class SubsonicApi {
         'Username': config.username,
         'Pw': config.password,
       }));
-      final response = await request.close();
-      final text = await utf8.decoder.bind(response).join();
+      final response =
+          await request.close().timeout(const Duration(seconds: 12));
+      final text = await utf8.decoder
+          .bind(response)
+          .join()
+          .timeout(const Duration(seconds: 12));
       final body = jsonDecode(text) as Map<String, dynamic>? ?? const {};
       final token = body['AccessToken']?.toString();
       final user = body['User'];
@@ -203,17 +256,37 @@ class SubsonicApi {
     );
   }
 
-  Future<List<Album>> getAlbums(
-      {String type = 'newest', int size = 200}) async {
-    final body = await _get(
-      'getAlbumList2.view',
-      parameters: {'type': type, 'size': '$size'},
-    );
-    final nodes = (body['albumList2'] as Map?)?['album'];
-    return asList(nodes)
-        .whereType<Map>()
-        .map((node) => Album.fromNode(Map<String, dynamic>.from(node)))
-        .toList();
+  Future<List<Album>> getAlbums({
+    String type = 'newest',
+    int size = 500,
+  }) async {
+    final albums = <Album>[];
+    final seen = <String>{};
+    var offset = 0;
+    while (offset < 20000) {
+      final body = await _get(
+        'getAlbumList2.view',
+        parameters: {
+          'type': type,
+          'size': '$size',
+          'offset': '$offset',
+        },
+      );
+      final nodes = (body['albumList2'] as Map?)?['album'];
+      final page = asList(nodes)
+          .whereType<Map>()
+          .map((node) => Album.fromNode(Map<String, dynamic>.from(node)))
+          .where((album) => album.id.isNotEmpty)
+          .toList();
+      if (page.isEmpty) break;
+      final before = albums.length;
+      for (final album in page) {
+        if (seen.add(album.id)) albums.add(album);
+      }
+      if (albums.length == before) break;
+      offset += page.length;
+    }
+    return albums;
   }
 
   Future<List<Song>> getAlbum(String albumId) async {
@@ -227,10 +300,16 @@ class SubsonicApi {
 
   Future<List<Artist>> getArtists() async {
     final body = await _get('getArtists.view');
-    final indexes = (body['artists'] as Map?)?['index'];
+    final collection = body['artists'] as Map?;
+    final indexes = collection?['index'];
     final result = <Artist>[];
     for (final index in asList(indexes).whereType<Map>()) {
       for (final node in asList(index['artist']).whereType<Map>()) {
+        result.add(Artist.fromNode(Map<String, dynamic>.from(node)));
+      }
+    }
+    if (result.isEmpty) {
+      for (final node in asList(collection?['artist']).whereType<Map>()) {
         result.add(Artist.fromNode(Map<String, dynamic>.from(node)));
       }
     }
@@ -245,6 +324,7 @@ class SubsonicApi {
       };
     }
     final counts = <String, int>{};
+    final seenAlbums = <String>{};
     for (final type in const [
       'newest',
       'alphabeticalByName',
@@ -254,6 +334,7 @@ class SubsonicApi {
         final albums = await getAlbums(type: type, size: 500);
         for (final album in albums) {
           if (album.artistId.isEmpty) continue;
+          if (album.id.isNotEmpty && !seenAlbums.add(album.id)) continue;
           counts[album.artistId] =
               (counts[album.artistId] ?? 0) + album.songCount;
         }
@@ -279,10 +360,15 @@ class SubsonicApi {
         'Fields': 'Artists,ArtistItems',
         'EnableImages': 'false',
       });
-      final request = await _http.getUrl(uri);
+      final request =
+          await _http.getUrl(uri).timeout(const Duration(seconds: 12));
       request.headers.set('X-Emby-Token', _jellyfinToken!);
-      final response = await request.close();
-      final text = await utf8.decoder.bind(response).join();
+      final response =
+          await request.close().timeout(const Duration(seconds: 12));
+      final text = await utf8.decoder
+          .bind(response)
+          .join()
+          .timeout(const Duration(seconds: 12));
       if (response.statusCode < 200 || response.statusCode >= 300) {
         return null;
       }
@@ -309,7 +395,7 @@ class SubsonicApi {
       }
       start += items.length;
       final total = (body['TotalRecordCount'] as num?)?.toInt() ?? 0;
-      if (items.length < 500 || (total > 0 && start >= total)) break;
+      if (total > 0 && start >= total) break;
     }
     return _jellyfinArtistCountCache = counts;
   }
@@ -325,12 +411,15 @@ class SubsonicApi {
 
   Future<List<Song>> getArtistSongs(String artistId) async {
     final jellyfin = await _getJellyfinArtistSongs(artistId);
-    if (jellyfin.isNotEmpty) return jellyfin;
+    if (jellyfin != null) return jellyfin;
     final albums = await getArtistAlbums(artistId);
     final songs = <Song>[];
-    for (final album in albums.take(80)) {
+    final seen = <String>{};
+    for (final album in albums) {
       try {
-        songs.addAll(await getAlbum(album.id));
+        for (final song in await getAlbum(album.id)) {
+          if (seen.add(song.id)) songs.add(song);
+        }
       } catch (_) {
         continue;
       }
@@ -338,10 +427,11 @@ class SubsonicApi {
     return songs;
   }
 
-  Future<List<Song>> _getJellyfinArtistSongs(String artistId) async {
+  Future<List<Song>?> _getJellyfinArtistSongs(String artistId) async {
     final credentials = await _jellyfinReady();
-    if (credentials == null) return const [];
+    if (credentials == null) return null;
     final songs = <Song>[];
+    final seen = <String>{};
     var start = 0;
     while (start < 20000) {
       final uri = Uri.parse('$root/Items').replace(queryParameters: {
@@ -354,20 +444,27 @@ class SubsonicApi {
         'Fields': 'Artists,ArtistItems',
         'EnableImages': 'false',
       });
-      final request = await _http.getUrl(uri);
+      final request =
+          await _http.getUrl(uri).timeout(const Duration(seconds: 12));
       request.headers.set('X-Emby-Token', _jellyfinToken!);
-      final response = await request.close();
-      final text = await utf8.decoder.bind(response).join();
-      if (response.statusCode < 200 || response.statusCode >= 300) break;
+      final response =
+          await request.close().timeout(const Duration(seconds: 12));
+      final text = await utf8.decoder
+          .bind(response)
+          .join()
+          .timeout(const Duration(seconds: 12));
+      if (response.statusCode < 200 || response.statusCode >= 300) return null;
       final body = jsonDecode(text) as Map<String, dynamic>? ?? const {};
       final items = asList(body['Items']).whereType<Map>().toList();
       if (items.isEmpty) break;
-      songs.addAll(
-        items.map((item) => _jellyfinSong(Map<String, dynamic>.from(item))),
-      );
+      final before = songs.length;
+      for (final item in items) {
+        final song = _jellyfinSong(Map<String, dynamic>.from(item));
+        if (song.id.isNotEmpty && seen.add(song.id)) songs.add(song);
+      }
       start += items.length;
       final total = (body['TotalRecordCount'] as num?)?.toInt() ?? 0;
-      if (items.length < 500 || (total > 0 && start >= total)) break;
+      if (songs.length == before || (total > 0 && start >= total)) break;
     }
     return songs.where((song) => song.id.isNotEmpty).toList();
   }
@@ -377,8 +474,14 @@ class SubsonicApi {
     final songs = (body['starred2'] as Map?)?['song'];
     return asList(songs)
         .whereType<Map>()
-        .map((node) => Song.fromNode(Map<String, dynamic>.from(node)))
+        .map((node) => Song.fromNode(
+              Map<String, dynamic>.from(node),
+            ).withStarred(true))
         .toList();
+  }
+
+  Future<void> setStarred(String songId, bool value) async {
+    await _get(value ? 'star.view' : 'unstar.view', parameters: {'id': songId});
   }
 
   Future<List<Song>> getRecentlyPlayed() async {

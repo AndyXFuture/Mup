@@ -133,8 +133,17 @@ class _LeftTrack extends StatelessWidget {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(LucideIcons.heart, size: 14, color: theme.danger),
-                  const SizedBox(width: 7),
+                  MupIconButton(
+                    icon: LucideIcons.heart,
+                    size: 22,
+                    iconSize: 14,
+                    color: controller.currentSongIsStarred
+                        ? theme.danger
+                        : theme.muted,
+                    tooltip: controller.currentSongIsStarred ? '取消收藏' : '收藏',
+                    onTap: song == null ? null : controller.toggleCurrentStar,
+                  ),
+                  const SizedBox(width: 4),
                   Flexible(
                     child: Text(
                       song?.title ?? '未在播放',
@@ -303,7 +312,9 @@ class _PlayButtonState extends State<_PlayButton> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
+          duration: MediaQuery.of(context).disableAnimations
+              ? Duration.zero
+              : const Duration(milliseconds: 160),
           width: 44,
           height: 44,
           decoration: BoxDecoration(
@@ -362,58 +373,64 @@ class _ProgressStripState extends State<_ProgressStrip> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = MupTheme.of(context);
     final audio = widget.controller.audio;
-    final duration = audio.duration.inMilliseconds > 0
-        ? audio.duration
-        : Duration(seconds: audio.currentSong?.duration ?? 0);
-    final maxMs = math.max(1, duration.inMilliseconds);
-    final value = audio.position.inMilliseconds.clamp(0, maxMs).toDouble();
-    final displayPosition = _hoverMs == null
-        ? audio.position
-        : Duration(milliseconds: _hoverMs!.round());
-    final timeStyle = TextStyle(
-      color: theme.muted,
-      fontSize: 10.5,
-      fontFeatures: const [FontFeature.tabularFigures()],
-    );
-    return SizedBox(
-      height: 16,
-      child: Row(
-        children: [
-          SizedBox(
-            width: 42,
-            child: Text(
-              _time(displayPosition),
-              textAlign: TextAlign.right,
-              style: timeStyle,
-            ),
+    return ValueListenableBuilder<Duration>(
+      valueListenable: audio.positionListenable,
+      builder: (context, playbackPosition, _) {
+        final theme = MupTheme.of(context);
+        final duration = audio.duration.inMilliseconds > 0
+            ? audio.duration
+            : Duration(seconds: audio.currentSong?.duration ?? 0);
+        final maxMs = math.max(1, duration.inMilliseconds);
+        final value =
+            playbackPosition.inMilliseconds.clamp(0, maxMs).toDouble();
+        final displayPosition = _hoverMs == null
+            ? playbackPosition
+            : Duration(milliseconds: _hoverMs!.round());
+        final timeStyle = TextStyle(
+          color: theme.muted,
+          fontSize: 10.5,
+          fontFeatures: const [FontFeature.tabularFigures()],
+        );
+        return SizedBox(
+          height: 16,
+          child: Row(
+            children: [
+              SizedBox(
+                width: 42,
+                child: Text(
+                  _time(displayPosition),
+                  textAlign: TextAlign.right,
+                  style: timeStyle,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: HoverProgressBar(
+                  value: value,
+                  max: maxMs.toDouble(),
+                  onChanged: (next) =>
+                      audio.seek(Duration(milliseconds: next.round())),
+                  height: 16,
+                  trackHeight: 2,
+                  showThumbOnHover: true,
+                  onHover: (position) => setState(() => _hoverMs = position),
+                  onHoverExit: () => setState(() => _hoverMs = null),
+                ),
+              ),
+              const SizedBox(width: 10),
+              SizedBox(
+                width: 42,
+                child: Text(
+                  _time(duration),
+                  textAlign: TextAlign.left,
+                  style: timeStyle,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: HoverProgressBar(
-              value: value,
-              max: maxMs.toDouble(),
-              onChanged: (next) =>
-                  audio.seek(Duration(milliseconds: next.round())),
-              height: 16,
-              trackHeight: 2,
-              showThumbOnHover: true,
-              onHover: (position) => setState(() => _hoverMs = position),
-              onHoverExit: () => setState(() => _hoverMs = null),
-            ),
-          ),
-          const SizedBox(width: 10),
-          SizedBox(
-            width: 42,
-            child: Text(
-              _time(duration),
-              textAlign: TextAlign.left,
-              style: timeStyle,
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -647,7 +664,9 @@ class _HoverProgressBarState extends State<HoverProgressBar> {
                               (!widget.showThumbOnHover || _hover || _dragging)
                                   ? 1
                                   : 0,
-                          duration: const Duration(milliseconds: 140),
+                          duration: MediaQuery.of(context).disableAnimations
+                              ? Duration.zero
+                              : const Duration(milliseconds: 140),
                           child: Container(
                             width: 8,
                             height: 8,

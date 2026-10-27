@@ -54,6 +54,12 @@ class MupAppShell extends StatelessWidget {
                   child: Column(
                     children: [
                       MupTitleBar(controller: controller),
+                      if (controller.stage == AppStage.ready &&
+                          controller.securityNotice != null)
+                        _SecurityNotice(
+                          message: controller.securityNotice!,
+                          onDismiss: controller.dismissSecurityNotice,
+                        ),
                       Expanded(child: _body(controller)),
                     ],
                   ),
@@ -97,6 +103,50 @@ class MupAppShell extends StatelessWidget {
   }
 }
 
+class _SecurityNotice extends StatelessWidget {
+  const _SecurityNotice({required this.message, required this.onDismiss});
+
+  final String message;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = MupTheme.of(context);
+    return Container(
+      height: 34,
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 11),
+      decoration: BoxDecoration(
+        color: theme.danger.withValues(alpha: 0.09),
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(color: theme.danger.withValues(alpha: 0.22)),
+      ),
+      child: Row(
+        children: [
+          Icon(LucideIcons.shieldAlert, size: 13, color: theme.danger),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: theme.muted, fontSize: 11),
+            ),
+          ),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onDismiss,
+            child: Padding(
+              padding: const EdgeInsets.all(5),
+              child: Icon(LucideIcons.x, size: 12, color: theme.dim),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _AnimatedWindow extends StatelessWidget {
   const _AnimatedWindow({required this.controller, required this.child});
 
@@ -122,12 +172,34 @@ class MupTitleBar extends StatefulWidget {
   State<MupTitleBar> createState() => _MupTitleBarState();
 }
 
-class _MupTitleBarState extends State<MupTitleBar> {
+class _MupTitleBarState extends State<MupTitleBar> with WindowListener {
   bool _maximized = false;
 
   @override
   void initState() {
     super.initState();
+    windowManager.addListener(this);
+    _refreshMaximized();
+  }
+
+  @override
+  void dispose() {
+    windowManager.removeListener(this);
+    super.dispose();
+  }
+
+  @override
+  void onWindowMaximize() {
+    if (mounted) setState(() => _maximized = true);
+  }
+
+  @override
+  void onWindowUnmaximize() {
+    if (mounted) setState(() => _maximized = false);
+  }
+
+  @override
+  void onWindowRestore() {
     _refreshMaximized();
   }
 

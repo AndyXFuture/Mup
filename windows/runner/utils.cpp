@@ -63,3 +63,56 @@ std::string Utf8FromUtf16(const wchar_t* utf16_string) {
   }
   return utf8_string;
 }
+
+void ShowAndFocusWindow(HWND window) {
+  if (window == nullptr || !::IsWindow(window)) return;
+
+  if (::IsIconic(window)) {
+    ::ShowWindow(window, SW_RESTORE);
+  } else {
+    ::ShowWindow(window, SW_SHOW);
+  }
+
+  RECT rect{};
+  HMONITOR monitor = nullptr;
+  if (::GetWindowRect(window, &rect)) {
+    monitor = ::MonitorFromRect(&rect, MONITOR_DEFAULTTONULL);
+  }
+
+  // A normal visible window must still intersect a monitor. This catches the
+  // -32000 sentinel rectangle left by some hide/minimize transitions.
+  bool intersects_monitor = false;
+  if (monitor != nullptr) {
+    MONITORINFO info{};
+    info.cbSize = sizeof(info);
+    if (::GetMonitorInfo(monitor, &info)) {
+      RECT visible{};
+      intersects_monitor =
+          ::IntersectRect(&visible, &rect, &info.rcWork) != FALSE &&
+          visible.right - visible.left >= 120 &&
+          visible.bottom - visible.top >= 80;
+    }
+  }
+
+  if (!intersects_monitor) {
+    monitor = ::MonitorFromWindow(window, MONITOR_DEFAULTTOPRIMARY);
+    MONITORINFO info{};
+    info.cbSize = sizeof(info);
+    if (monitor != nullptr && ::GetMonitorInfo(monitor, &info)) {
+      const LONG work_width = info.rcWork.right - info.rcWork.left;
+      const LONG work_height = info.rcWork.bottom - info.rcWork.top;
+      LONG width = rect.right - rect.left;
+      LONG height = rect.bottom - rect.top;
+      if (width < 980) width = 980;
+      if (height < 622) height = 622;
+      if (width > work_width) width = work_width;
+      if (height > work_height) height = work_height;
+      const LONG x = info.rcWork.left + (work_width - width) / 2;
+      const LONG y = info.rcWork.top + (work_height - height) / 2;
+      ::SetWindowPos(window, HWND_TOP, x, y, width, height,
+                     SWP_SHOWWINDOW | SWP_NOOWNERZORDER);
+    }
+  }
+
+  ::SetForegroundWindow(window);
+}

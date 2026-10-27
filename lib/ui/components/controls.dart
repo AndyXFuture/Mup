@@ -54,9 +54,13 @@ class _MupIconButtonState extends State<MupIconButton> {
               },
         child: AnimatedScale(
           scale: _pressed ? 0.93 : 1,
-          duration: const Duration(milliseconds: 120),
+          duration: MediaQuery.of(context).disableAnimations
+              ? Duration.zero
+              : const Duration(milliseconds: 120),
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
+            duration: MediaQuery.of(context).disableAnimations
+                ? Duration.zero
+                : const Duration(milliseconds: 180),
             width: widget.size,
             height: widget.size,
             decoration: widget.filled
@@ -128,7 +132,9 @@ class _MupTextButtonState extends State<MupTextButton> {
           widget.onTap?.call();
         },
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
+          duration: MediaQuery.of(context).disableAnimations
+              ? Duration.zero
+              : const Duration(milliseconds: 160),
           height: 34,
           width: widget.iconOnly ? 34 : null,
           padding: widget.iconOnly
@@ -206,7 +212,9 @@ class GlowToggle extends StatelessWidget {
     return GestureDetector(
       onTap: () => onChanged(!value),
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 220),
+        duration: MediaQuery.of(context).disableAnimations
+            ? Duration.zero
+            : const Duration(milliseconds: 220),
         width: 42,
         height: 24,
         padding: const EdgeInsets.all(3),
@@ -226,7 +234,9 @@ class GlowToggle extends StatelessWidget {
               : null,
         ),
         child: AnimatedAlign(
-          duration: const Duration(milliseconds: 220),
+          duration: MediaQuery.of(context).disableAnimations
+              ? Duration.zero
+              : const Duration(milliseconds: 220),
           curve: Curves.easeOutCubic,
           alignment: value ? Alignment.centerRight : Alignment.centerLeft,
           child: Container(

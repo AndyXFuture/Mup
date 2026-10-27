@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../core/app_controller.dart';
-import '../../core/models.dart';
 import '../components/controls.dart';
 import '../components/cover_art.dart';
 import '../theme.dart';
@@ -42,14 +41,18 @@ class PlayerPage extends StatelessWidget {
                   ),
                 ),
                 const Spacer(),
-                Icon(LucideIcons.heart, size: 16, color: theme.danger),
-                const SizedBox(width: 18),
                 MupIconButton(
-                  icon: LucideIcons.moreHorizontal,
-                  size: 28,
-                  iconSize: 17,
-                  onTap: () {},
+                  icon: LucideIcons.heart,
+                  size: 30,
+                  iconSize: 16,
+                  color: controller.currentSongIsStarred
+                      ? theme.danger
+                      : theme.muted,
+                  tooltip: controller.currentSongIsStarred ? '取消收藏' : '收藏',
+                  onTap: controller.toggleCurrentStar,
                 ),
+                const SizedBox(width: 18),
+                _MoreMenuButton(controller: controller),
               ],
             ),
           ),
@@ -128,6 +131,63 @@ class PlayerPage extends StatelessWidget {
   }
 }
 
+class _MoreMenuButton extends StatefulWidget {
+  const _MoreMenuButton({required this.controller});
+
+  final AppController controller;
+
+  @override
+  State<_MoreMenuButton> createState() => _MoreMenuButtonState();
+}
+
+class _MoreMenuButtonState extends State<_MoreMenuButton> {
+  final GlobalKey _buttonKey = GlobalKey();
+
+  Future<void> _showMenu() async {
+    final song = widget.controller.audio.currentSong;
+    final context = _buttonKey.currentContext;
+    if (song == null || context == null) return;
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final box = context.findRenderObject() as RenderBox;
+    final origin = box.localToGlobal(Offset.zero, ancestor: overlay);
+    final action = await showMenu<String>(
+      context: context,
+      popUpAnimationStyle: widget.controller.config.reduceMotion
+          ? AnimationStyle.noAnimation
+          : null,
+      position: RelativeRect.fromRect(
+        origin & box.size,
+        Offset.zero & overlay.size,
+      ),
+      items: [
+        if (song.albumId.isNotEmpty)
+          const PopupMenuItem(value: 'album', child: Text('查看专辑')),
+        if (song.artistId.isNotEmpty)
+          const PopupMenuItem(value: 'artist', child: Text('查看歌手')),
+        const PopupMenuItem(value: 'library', child: Text('返回曲库')),
+      ],
+    );
+    if (!mounted) return;
+    switch (action) {
+      case 'album':
+        await widget.controller.openAlbum(song);
+      case 'artist':
+        await widget.controller.openArtist(song);
+      case 'library':
+        widget.controller.openLibrary();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => MupIconButton(
+        key: _buttonKey,
+        icon: LucideIcons.moreHorizontal,
+        size: 28,
+        iconSize: 17,
+        onTap: _showMenu,
+      );
+}
+
 class _LyricsPane extends StatefulWidget {
   const _LyricsPane({required this.controller});
 
@@ -140,18 +200,26 @@ class _LyricsPane extends StatefulWidget {
 class _LyricsPaneState extends State<_LyricsPane> {
   late final ScrollController _scroll;
   int _lastIndex = -1;
+  String? _lastSongId;
+  bool _scrollRetryScheduled = false;
 
   @override
   void didUpdateWidget(covariant _LyricsPane oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final songId = widget.controller.audio.currentSong?.id;
+    if (songId != _lastSongId) {
+      _lastSongId = songId;
+      _lastIndex = -1;
+    }
     _scheduleScroll();
   }
 
   @override
   void initState() {
     super.initState();
+    _lastSongId = widget.controller.audio.currentSong?.id;
     final initial = widget.controller.lyrics.isEmpty
-        ? 3
+        ? 0
         : widget.controller.activeLyricIndex
             .clamp(0, widget.controller.lyrics.length - 1);
     _scroll = ScrollController(initialScrollOffset: initial * 36.0);
@@ -159,8 +227,22 @@ class _LyricsPaneState extends State<_LyricsPane> {
   }
 
   void _scheduleScroll() {
+    if (widget.controller.lyrics.isEmpty) {
+      _lastIndex = -1;
+      return;
+    }
     final index = widget.controller.activeLyricIndex;
-    if (index == _lastIndex || !_scroll.hasClients) return;
+    if (!_scroll.hasClients) {
+      if (!_scrollRetryScheduled) {
+        _scrollRetryScheduled = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _scrollRetryScheduled = false;
+          if (mounted) _scheduleScroll();
+        });
+      }
+      return;
+    }
+    if (index == _lastIndex) return;
     _lastIndex = index;
     final target =
         (index.clamp(0, math.max(0, widget.controller.lyrics.length - 1)) *
@@ -185,12 +267,16 @@ class _LyricsPaneState extends State<_LyricsPane> {
   Widget build(BuildContext context) {
     final theme = MupTheme.of(context);
     final controller = widget.controller;
-    final lines = controller.lyrics.isEmpty
-        ? _fallbackLyrics(controller.audio.currentSong)
-        : controller.lyrics;
-    final active = controller.lyrics.isEmpty
-        ? 3
-        : controller.activeLyricIndex.clamp(0, lines.length - 1);
+    if (controller.lyrics.isEmpty) {
+      return Center(
+        child: Text(
+          '暂无歌词',
+          style: TextStyle(color: theme.muted, fontSize: 13),
+        ),
+      );
+    }
+    final lines = controller.lyrics;
+    final active = controller.activeLyricIndex.clamp(0, lines.length - 1);
     return LayoutBuilder(
       builder: (context, constraints) {
         return ListView.builder(
@@ -228,19 +314,5 @@ class _LyricsPaneState extends State<_LyricsPane> {
         );
       },
     );
-  }
-
-  List<LyricLine> _fallbackLyrics(Song? song) {
-    final title = song?.title ?? '音乐与此刻';
-    final artist = song?.artist ?? '';
-    return [
-      const LyricLine(0, '房间里，光慢下来'),
-      const LyricLine(0, '让旋律替时间说话'),
-      const LyricLine(0, '每一段安静都有回声'),
-      LyricLine(0, '正在播放 · $title'),
-      if (artist.isNotEmpty) LyricLine(0, artist),
-      const LyricLine(0, '把耳机里的世界，留给此刻'),
-      const LyricLine(0, '音珏 · Mup'),
-    ];
   }
 }

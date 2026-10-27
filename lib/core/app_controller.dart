@@ -21,10 +21,12 @@ class AppController extends ChangeNotifier {
       : audio = MupAudioController(),
         autostart = AutostartService() {
     audio.addListener(_onAudioChanged);
+    audio.positionListenable.addListener(_onPlaybackProgress);
   }
 
   final MupAudioController audio;
   final AutostartService autostart;
+  final ValueNotifier<String?> actionError = ValueNotifier<String?>(null);
   late AppConfig config;
   AppConfig? _draftConfig;
   SubsonicApi? _api;
@@ -43,16 +45,22 @@ class AppController extends ChangeNotifier {
   String searchQuery = '';
   String? connectError;
   String? contentError;
+  String? securityNotice;
   bool loading = true;
   bool compact = false;
   bool _demoMode = false;
   List<Artist> _demoArtists = const [];
   bool _disposed = false;
   int _requestToken = 0;
+  int _connectGeneration = 0;
+  bool _canCancelConnect = false;
+  AppPage _pageBeforeConnect = AppPage.library;
+  String _detailArtist = '';
   Timer? _saveTimer;
   Timer? _positionSaveTimer;
 
   SubsonicApi? get api => _api;
+  bool get canCancelConnect => _canCancelConnect;
   AppConfig get draftConfig => _draftConfig ??= AppConfig(
         host: config.host,
         port: config.port,
@@ -63,6 +71,7 @@ class AppController extends ChangeNotifier {
 
   Future<void> initialize() async {
     config = await ConfigStore.instance.load();
+    securityNotice = ConfigStore.instance.loadWarning;
     final actualAutostart = await autostart.isEnabled();
     config.autostart = actualAutostart;
     audio.setVolume(config.volume);
@@ -78,6 +87,7 @@ class AppController extends ChangeNotifier {
     if (!config.hasServer) {
       stage = AppStage.connect;
       loading = false;
+      connectError = securityNotice;
       _notify();
       return;
     }
@@ -193,12 +203,13 @@ class AppController extends ChangeNotifier {
     _notify();
     try {
       playlists = await client.getPlaylists();
+      String? selectedPlaylistKey;
       if (playlists.isNotEmpty) {
         final selected =
             playlists.where((item) => item.id == config.lastPlaylistId);
-        await openPlaylist(
-            selected.isNotEmpty ? selected.first : playlists.first,
-            preserveLoading: true);
+        final playlist = selected.isNotEmpty ? selected.first : playlists.first;
+        selectedPlaylistKey = 'playlist:${playlist.id}';
+        await openPlaylist(playlist, preserveLoading: true);
       } else {
         await _loadAlbums(
           preserveLoading: true,
@@ -210,6 +221,7 @@ class AppController extends ChangeNotifier {
         songs,
         preferredSongId: config.lastSongId,
         positionMs: config.lastPositionMs,
+        queueKey: selectedPlaylistKey,
       );
     } catch (error) {
       contentError = '加载曲库失败：$error';
@@ -226,12 +238,14 @@ class AppController extends ChangeNotifier {
     String password,
     String protocol,
   ) async {
+    final connectGeneration = ++_connectGeneration;
+    final endpoint = _normalizeEndpoint(host, port, protocol);
     final candidate = AppConfig(
-      host: _normalizeHost(host),
-      port: port,
+      host: endpoint.host,
+      port: endpoint.port,
       username: username.trim(),
       password: password,
-      protocol: protocol,
+      protocol: endpoint.protocol,
       volume: config.volume,
       playMode: config.playMode,
       themeMode: config.themeMode,
@@ -239,6 +253,11 @@ class AppController extends ChangeNotifier {
       autostart: config.autostart,
       window: config.window,
     );
+    if (candidate.port < 1 || candidate.port > 65535) {
+      connectError = '端口必须是 1 到 65535 之间的数字';
+      _notify();
+      return false;
+    }
     if (!candidate.hasServer) {
       connectError = '服务器地址、用户名和密码不能为空';
       _notify();
@@ -248,14 +267,23 @@ class AppController extends ChangeNotifier {
     connectError = null;
     _notify();
     final client = SubsonicApi(candidate);
-    if (!await client.ping()) {
+    final reachable = await client.ping();
+    if (connectGeneration != _connectGeneration) {
+      client.close();
+      return false;
+    }
+    if (!reachable) {
       client.close();
       loading = false;
       connectError = '连接失败，请确认地址、端口和账号信息';
       _notify();
       return false;
     }
+    // The server has accepted the connection. Commit it as one operation so a
+    // late cancellation cannot leave the controller half-connected.
+    _canCancelConnect = false;
     _api?.close();
+    audio.clearQueue();
     config.host = candidate.host;
     config.port = candidate.port;
     config.username = candidate.username;
@@ -263,29 +291,107 @@ class AppController extends ChangeNotifier {
     config.protocol = candidate.protocol;
     _api = client;
     audio.attachApi(client);
-    stage = AppStage.ready;
-    await ConfigStore.instance.save(config);
+    final saved = await ConfigStore.instance.save(config);
+    securityNotice = saved ? null : '服务器密码无法安全保存，请检查配置目录权限。';
     await _loadStartupContent();
+    stage = AppStage.ready;
+    _notify();
     return true;
   }
 
-  String _normalizeHost(String input) {
+  ({String host, int port, String protocol}) _normalizeEndpoint(
+    String input,
+    int fallbackPort,
+    String fallbackProtocol,
+  ) {
     var value = input.trim();
+    var resolvedPort = fallbackPort;
+    var resolvedProtocol = fallbackProtocol;
     if (value.startsWith('http://') || value.startsWith('https://')) {
       final uri = Uri.tryParse(value);
       if (uri != null) {
         value = uri.host;
-        if (uri.port > 0) draftConfig.port = uri.port;
+        if (uri.port > 0) resolvedPort = uri.port;
+        if (uri.scheme == 'http' || uri.scheme == 'https') {
+          resolvedProtocol = uri.scheme;
+        }
       }
     }
-    return value.replaceAll(RegExp(r'/$'), '');
+    return (
+      host: value.replaceAll(RegExp(r'/$'), ''),
+      port: resolvedPort,
+      protocol: resolvedProtocol,
+    );
   }
 
   Future<void> refreshCurrent() async {
     if (activePlaylist != null) {
       await openPlaylist(activePlaylist!, force: true);
-    } else {
-      await selectNavigation(activeNav);
+      return;
+    }
+    if (activeNav.startsWith('album:')) {
+      await _loadAlbumDetail(
+        activeNav.substring('album:'.length),
+        title: contentTitle,
+        artist: _detailArtist,
+        coverId: headerCoverId,
+      );
+      return;
+    }
+    if (activeNav.startsWith('artist:')) {
+      await _loadArtistDetail(
+        activeNav.substring('artist:'.length),
+        title: contentTitle,
+        coverId: headerCoverId,
+      );
+      return;
+    }
+    if (activeNav == 'search') {
+      await search(searchQuery);
+      return;
+    }
+    switch (activeNav) {
+      case 'starred':
+        await _loadSongs(
+          contentTitle: '收藏',
+          loadingLabel: '正在读取收藏',
+          loader: () => _api!.getStarred(),
+        );
+      case 'recent':
+        await _loadRecent();
+      case 'artists':
+        await _loadArtists();
+      case 'albums':
+        await _loadAlbums();
+      default:
+        await _loadAlbums(title: '最近添加', navigation: 'home');
+    }
+  }
+
+  Future<void> refreshPlaylists() async {
+    final client = _api;
+    if (client == null) return;
+    try {
+      final result = await client.getPlaylists();
+      final knownCounts = {
+        for (final playlist in playlists)
+          if (playlist.songCount > 0) playlist.id: playlist.songCount,
+      };
+      playlists = [
+        for (final playlist in result)
+          playlist.songCount > 0
+              ? playlist
+              : playlist.withSongCount(knownCounts[playlist.id] ?? 0),
+      ];
+      final activeId = activePlaylist?.id;
+      if (activeId != null) {
+        final refreshed = playlists.where((item) => item.id == activeId);
+        if (refreshed.isNotEmpty) activePlaylist = refreshed.first;
+      }
+      _notify();
+    } catch (error) {
+      contentError = '刷新歌单列表失败：$error';
+      _notify();
     }
   }
 
@@ -299,6 +405,8 @@ class AppController extends ChangeNotifier {
     contentTitle = playlist.name;
     contentSubtitle = '${playlist.songCount} 首';
     headerCoverId = playlist.coverId;
+    _detailArtist = '';
+    contentError = null;
     albums = [];
     artists = [];
     if (!preserveLoading) {
@@ -307,23 +415,22 @@ class AppController extends ChangeNotifier {
       _notify();
     }
     try {
-      final result =
-          await client.getPlaylistSongs(playlist.id, complete: force);
+      final page = await client.getPlaylistSongs(playlist.id, complete: force);
+      final result = page.songs;
+      final totalCount = page.totalCount;
+      _updatePlaylistSongCount(playlist.id, totalCount);
+      final queueKey = 'playlist:${playlist.id}';
+      if (force && audio.playbackQueueKey == queueKey) {
+        audio.replaceQueueKeepingCurrent(result, queueKey: queueKey);
+      }
       if (token != _requestToken) return;
       songs = result;
-      contentSubtitle =
-          '${max(result.length, playlist.songCount)} 首${_durationLabel(result)}';
+      contentSubtitle = totalCount > result.length
+          ? '${result.length}/$totalCount 首 · 正在补全'
+          : '${result.length} 首${_durationLabel(result)}';
       config.lastPlaylistId = playlist.id;
       _persistSoon();
-      if (audio.queue.isEmpty || force) {
-        audio.restoreQueue(
-          songs,
-          preferredSongId: config.lastSongId,
-          positionMs: config.lastPositionMs,
-        );
-      }
-      if (!force &&
-          (playlist.songCount > result.length || result.length >= 50)) {
+      if (!force && totalCount > result.length) {
         unawaited(_hydrateFullPlaylist(playlist, token));
       }
     } catch (error) {
@@ -340,13 +447,41 @@ class AppController extends ChangeNotifier {
     final client = _api;
     if (client == null) return;
     try {
-      final full = await client.getPlaylistSongs(playlist.id);
+      final page = await client.getPlaylistSongs(playlist.id);
+      final full = page.songs;
+      _updatePlaylistSongCount(playlist.id, page.totalCount);
+      final queueKey = 'playlist:${playlist.id}';
+      if (audio.playbackQueueKey == queueKey) {
+        audio.replaceQueueKeepingCurrent(full, queueKey: queueKey);
+      }
       if (token != _requestToken || full.length <= songs.length) return;
       songs = full;
       contentSubtitle = '${full.length} 首${_durationLabel(full)}';
-      audio.replaceQueueKeepingCurrent(full);
       _notify();
     } catch (_) {}
+  }
+
+  void _updatePlaylistSongCount(String playlistId, int count) {
+    if (count <= 0) return;
+    var changed = false;
+    final updatedPlaylists = <Playlist>[];
+    for (final item in playlists) {
+      if (item.id == playlistId && item.songCount != count) {
+        updatedPlaylists.add(item.withSongCount(count));
+        changed = true;
+      } else {
+        updatedPlaylists.add(item);
+      }
+    }
+    playlists = updatedPlaylists;
+    final active = activePlaylist;
+    if (active != null &&
+        active.id == playlistId &&
+        active.songCount != count) {
+      activePlaylist = active.withSongCount(count);
+      changed = true;
+    }
+    if (changed) _notify();
   }
 
   String _durationLabel(List<Song> items) {
@@ -382,11 +517,7 @@ class AppController extends ChangeNotifier {
           loader: () => _api!.getStarred(),
         );
       case 'recent':
-        await _loadSongs(
-          contentTitle: '最近播放',
-          loadingLabel: '正在读取播放记录',
-          loader: () => _api!.getRecentlyPlayed(),
-        );
+        await _loadRecent();
       case 'artists':
         await _loadArtists();
       case 'albums':
@@ -416,9 +547,6 @@ class AppController extends ChangeNotifier {
       if (token != _requestToken) return;
       songs = result;
       contentSubtitle = '${result.length} 首';
-      audio.restoreQueue(result,
-          preferredSongId: config.lastSongId,
-          positionMs: config.lastPlayPositionFor(result));
     } catch (error) {
       if (token == _requestToken) contentError = '加载失败：$error';
     } finally {
@@ -427,6 +555,14 @@ class AppController extends ChangeNotifier {
         _notify();
       }
     }
+  }
+
+  Future<void> _loadRecent() {
+    return _loadSongs(
+      contentTitle: '最近播放',
+      loadingLabel: '正在读取本地播放记录',
+      loader: () async => List<Song>.of(config.recentSongs),
+    );
   }
 
   Future<void> _loadAlbums({
@@ -445,6 +581,7 @@ class AppController extends ChangeNotifier {
     songs = [];
     artists = [];
     headerCoverId = '';
+    contentError = null;
     if (!preserveLoading) {
       loading = true;
       _notify();
@@ -501,84 +638,71 @@ class AppController extends ChangeNotifier {
 
   Future<void> openAlbum(Song song) async {
     if (song.albumId.isEmpty) return;
-    page = AppPage.library;
-    final token = ++_requestToken;
-    activePlaylist = null;
-    activeNav = 'album:${song.albumId}';
-    contentTitle = song.album;
-    contentSubtitle = song.artist;
-    headerCoverId = song.coverId;
-    loading = true;
-    songs = [];
-    albums = [];
-    artists = [];
-    _notify();
-    try {
-      final result = await _api!.getAlbum(song.albumId);
-      if (token != _requestToken) return;
-      songs = result;
-      contentSubtitle = '${song.artist} · ${result.length} 首';
-      audio.restoreQueue(result, preferredSongId: song.id);
-    } catch (error) {
-      if (token == _requestToken) contentError = '加载专辑失败：$error';
-    } finally {
-      if (token == _requestToken) {
-        loading = false;
-        _notify();
-      }
-    }
+    await _loadAlbumDetail(
+      song.albumId,
+      title: song.album,
+      artist: song.artist,
+      coverId: song.coverId,
+    );
   }
 
   Future<void> openArtist(Song song) async {
     if (song.artistId.isEmpty) return;
-    page = AppPage.library;
-    final token = ++_requestToken;
-    activePlaylist = null;
-    activeNav = 'artist:${song.artistId}';
-    contentTitle = song.artist;
-    contentSubtitle = '正在读取歌手作品';
-    headerCoverId = '';
-    loading = true;
-    songs = [];
-    albums = [];
-    artists = [];
-    _notify();
-    try {
-      final result = await _api!.getArtistSongs(song.artistId);
-      if (token != _requestToken) return;
-      songs = result;
-      contentSubtitle = '${result.length} 首';
-      audio.restoreQueue(result, preferredSongId: song.id);
-    } catch (error) {
-      if (token == _requestToken) contentError = '加载歌手失败：$error';
-    } finally {
-      if (token == _requestToken) {
-        loading = false;
-        _notify();
-      }
-    }
+    await _loadArtistDetail(
+      song.artistId,
+      title: song.artist,
+      coverId: '',
+    );
   }
 
   Future<void> openArtistEntry(Artist artist) async {
+    await _loadArtistDetail(
+      artist.id,
+      title: artist.name,
+      coverId: artist.coverId,
+    );
+  }
+
+  Future<void> openAlbumEntry(Album album) async {
+    await _loadAlbumDetail(
+      album.id,
+      title: album.name,
+      artist: album.artist,
+      coverId: album.coverId,
+    );
+  }
+
+  Future<void> _loadAlbumDetail(
+    String albumId, {
+    required String title,
+    required String artist,
+    required String coverId,
+  }) async {
+    final client = _api;
+    if (client == null || albumId.isEmpty) return;
+    page = AppPage.library;
     final token = ++_requestToken;
     activePlaylist = null;
-    activeNav = 'artist:${artist.id}';
-    contentTitle = artist.name;
-    contentSubtitle = '正在读取歌手作品';
-    headerCoverId = artist.coverId;
+    activeNav = 'album:$albumId';
+    contentTitle = title;
+    contentSubtitle = artist.isEmpty ? '正在读取专辑' : artist;
+    headerCoverId = coverId;
+    _detailArtist = artist;
     loading = true;
     songs = [];
     albums = [];
     artists = [];
+    contentError = null;
     _notify();
     try {
-      final result = await _api!.getArtistSongs(artist.id);
+      final result = await client.getAlbum(albumId);
       if (token != _requestToken) return;
       songs = result;
-      contentSubtitle = '${result.length} 首';
-      audio.restoreQueue(result);
+      contentSubtitle = artist.isEmpty
+          ? '${result.length} 首'
+          : '$artist · ${result.length} 首';
     } catch (error) {
-      if (token == _requestToken) contentError = '加载歌手失败：$error';
+      if (token == _requestToken) contentError = '加载专辑失败：$error';
     } finally {
       if (token == _requestToken) {
         loading = false;
@@ -587,26 +711,34 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> openAlbumEntry(Album album) async {
+  Future<void> _loadArtistDetail(
+    String artistId, {
+    required String title,
+    required String coverId,
+  }) async {
+    final client = _api;
+    if (client == null || artistId.isEmpty) return;
+    page = AppPage.library;
     final token = ++_requestToken;
     activePlaylist = null;
-    activeNav = 'album:${album.id}';
-    contentTitle = album.name;
-    contentSubtitle = album.artist;
-    headerCoverId = album.coverId;
+    activeNav = 'artist:$artistId';
+    contentTitle = title;
+    contentSubtitle = '正在读取歌手作品';
+    headerCoverId = coverId;
+    _detailArtist = '';
     loading = true;
     songs = [];
     albums = [];
     artists = [];
+    contentError = null;
     _notify();
     try {
-      final result = await _api!.getAlbum(album.id);
+      final result = await client.getArtistSongs(artistId);
       if (token != _requestToken) return;
       songs = result;
-      contentSubtitle = '${album.artist} · ${result.length} 首';
-      audio.restoreQueue(result);
+      contentSubtitle = '${result.length} 首';
     } catch (error) {
-      if (token == _requestToken) contentError = '加载专辑失败：$error';
+      if (token == _requestToken) contentError = '加载歌手失败：$error';
     } finally {
       if (token == _requestToken) {
         loading = false;
@@ -627,8 +759,12 @@ class AppController extends ChangeNotifier {
     activeNav = 'search';
     contentTitle = '搜索 “$keyword”';
     contentSubtitle = '正在搜索';
+    contentError = null;
+    headerCoverId = '';
     loading = true;
     songs = [];
+    albums = [];
+    artists = [];
     _notify();
     try {
       final result = await _api!.search(keyword);
@@ -654,7 +790,7 @@ class AppController extends ChangeNotifier {
     if (audio.currentSong?.id == song.id) {
       await audio.toggle();
     } else {
-      await audio.setQueue(songs, startIndex: index);
+      await audio.setQueue(songs, startIndex: index, queueKey: activeNav);
     }
   }
 
@@ -662,11 +798,54 @@ class AppController extends ChangeNotifier {
     if (songs.isEmpty) return;
     audio.setMode(shuffle ? 'random' : 'list');
     final start = shuffle ? Random().nextInt(songs.length) : 0;
-    await audio.setQueue(songs, startIndex: start);
+    await audio.setQueue(songs, startIndex: start, queueKey: activeNav);
+  }
+
+  bool get currentSongIsStarred => audio.currentSong?.starred == true;
+
+  Future<void> toggleCurrentStar() async {
+    final client = _api;
+    final song = audio.currentSong;
+    if (client == null || song == null) return;
+    final value = !song.starred;
+    try {
+      await client.setStarred(song.id, value);
+      final updated = song.withStarred(value);
+      audio.updateSong(updated);
+      final updatedSongs = [
+        for (final item in songs) item.id == song.id ? updated : item,
+      ];
+      songs = value || activeNav != 'starred'
+          ? updatedSongs
+          : updatedSongs.where((item) => item.id != song.id).toList();
+      for (var index = 0; index < config.recentSongs.length; index++) {
+        if (config.recentSongs[index].id == song.id) {
+          config.recentSongs[index] = updated;
+        }
+      }
+      albums = List<Album>.of(albums);
+      artists = List<Artist>.of(artists);
+      _persistSoon();
+      _notify();
+    } catch (error) {
+      contentError = '更新收藏失败：$error';
+      actionError.value = null;
+      actionError.value = '更新收藏失败，请检查连接后重试';
+      _notify();
+    }
+  }
+
+  void clearActionError() {
+    actionError.value = null;
   }
 
   void openPlayer() {
     page = AppPage.player;
+    _notify();
+  }
+
+  void dismissSecurityNotice() {
+    securityNotice = null;
     _notify();
   }
 
@@ -676,6 +855,8 @@ class AppController extends ChangeNotifier {
   }
 
   void openConnect() {
+    _pageBeforeConnect = page;
+    _canCancelConnect = config.hasServer && _api != null;
     _draftConfig = AppConfig(
       host: config.host,
       port: config.port,
@@ -684,8 +865,18 @@ class AppController extends ChangeNotifier {
       protocol: config.protocol,
     );
     connectError = null;
-    page = AppPage.library;
     stage = AppStage.connect;
+    _notify();
+  }
+
+  void cancelConnect() {
+    if (!_canCancelConnect) return;
+    _connectGeneration++;
+    connectError = null;
+    loading = false;
+    stage = AppStage.ready;
+    page = _pageBeforeConnect;
+    _canCancelConnect = false;
     _notify();
   }
 
@@ -759,7 +950,9 @@ class AppController extends ChangeNotifier {
     final song = audio.currentSong;
     if (song != null && song.id != _lastSeenSongId) {
       _lastSeenSongId = song.id;
+      _rememberSong(song);
       lyrics = [];
+      _lastLyricIndex = -2;
       _loadLyrics(song);
     }
     if (song != null) {
@@ -767,15 +960,37 @@ class AppController extends ChangeNotifier {
     }
     config.volume = audio.volume;
     config.playMode = audio.mode;
-    _positionSaveTimer ??= Timer(const Duration(seconds: 2), () {
-      _positionSaveTimer = null;
-      config.lastPositionMs = audio.position.inMilliseconds;
-      _persistSoon();
-    });
     _notify();
   }
 
+  void _rememberSong(Song song) {
+    config.recentSongs.removeWhere((item) => item.id == song.id);
+    config.recentSongs.insert(0, song);
+    if (config.recentSongs.length > 100) {
+      config.recentSongs.removeRange(100, config.recentSongs.length);
+    }
+    _persistSoon();
+  }
+
   String? _lastSeenSongId;
+  int _lastLyricIndex = -2;
+
+  void _onPlaybackProgress() {
+    if (_disposed) return;
+    final index = activeLyricIndex;
+    if (index != _lastLyricIndex) {
+      _lastLyricIndex = index;
+      _notify();
+    }
+    _positionSaveTimer ??= Timer(const Duration(seconds: 2), () {
+      _positionSaveTimer = null;
+      final song = audio.currentSong;
+      if (song == null) return;
+      config.lastSongId = song.id;
+      config.lastPositionMs = audio.position.inMilliseconds;
+      _persistSoon();
+    });
+  }
 
   Future<void> _loadLyrics(Song song) async {
     final client = _api;
@@ -867,15 +1082,10 @@ class AppController extends ChangeNotifier {
     _saveTimer?.cancel();
     _positionSaveTimer?.cancel();
     audio.removeListener(_onAudioChanged);
+    audio.positionListenable.removeListener(_onPlaybackProgress);
+    actionError.dispose();
     audio.dispose();
     _api?.close();
     super.dispose();
-  }
-}
-
-extension on AppConfig {
-  int lastPlayPositionFor(List<Song> songs) {
-    final contains = songs.any((song) => song.id == lastSongId);
-    return contains ? lastPositionMs : 0;
   }
 }

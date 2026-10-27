@@ -27,6 +27,13 @@ class MediaKeyService {
     _channel.setMethodCallHandler(null);
   }
 
+  Future<void> markReady() async {
+    if (!Platform.isWindows) return;
+    try {
+      await _channel.invokeMethod<void>('ready');
+    } catch (_) {}
+  }
+
   Future<void> _handleNativeCall(MethodCall call) async {
     if (call.method != 'media' || call.arguments is! Map) return;
     switch ((call.arguments as Map)['action']) {
@@ -36,10 +43,6 @@ class MediaKeyService {
         unawaited(audio.next());
       case 'previous':
         unawaited(audio.previous());
-      case 'volume_up':
-        unawaited(audio.setVolume((audio.volume + 5).clamp(0, 100)));
-      case 'volume_down':
-        unawaited(audio.setVolume((audio.volume - 5).clamp(0, 100)));
     }
   }
 }
@@ -62,7 +65,12 @@ class AutostartService {
         'reg',
         ['delete', _runKey, '/v', _valueName, '/f'],
       );
-      return result.exitCode == 0 || result.exitCode == 1;
+      if (result.exitCode == 0) return true;
+      final query = await Process.run(
+        'reg',
+        ['query', _runKey, '/v', _valueName],
+      );
+      return query.exitCode != 0;
     }
     final command = '"${Platform.resolvedExecutable}" --background';
     final result = await Process.run(

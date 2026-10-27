@@ -26,10 +26,25 @@ class _LibraryPageState extends State<LibraryPage> {
   late final TextEditingController _search = TextEditingController(
     text: widget.controller.searchQuery,
   );
+  late String _syncedSearchQuery = widget.controller.searchQuery;
   late final FocusNode _searchFocus = FocusNode();
   late double _sidebarWidth =
       widget.controller.config.sidebarWidth.clamp(180, 300);
   double _dragWidth = 0;
+
+  @override
+  void didUpdateWidget(covariant LibraryPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_syncedSearchQuery != widget.controller.searchQuery) {
+      _syncedSearchQuery = widget.controller.searchQuery;
+      _search.text = widget.controller.searchQuery;
+    }
+  }
+
+  void _clearSearch() {
+    _search.clear();
+    widget.controller.selectNavigation('home');
+  }
 
   @override
   void dispose() {
@@ -51,12 +66,19 @@ class _LibraryPageState extends State<LibraryPage> {
       shortcuts: const {
         SingleActivator(LogicalKeyboardKey.keyF, control: true):
             _FocusSearchIntent(),
+        SingleActivator(LogicalKeyboardKey.escape): _ClearSearchIntent(),
       },
       child: Actions(
         actions: {
           _FocusSearchIntent: CallbackAction<_FocusSearchIntent>(
             onInvoke: (_) {
               _focusSearch();
+              return null;
+            },
+          ),
+          _ClearSearchIntent: CallbackAction<_ClearSearchIntent>(
+            onInvoke: (_) {
+              _clearSearch();
               return null;
             },
           ),
@@ -134,6 +156,10 @@ class _LibraryPageState extends State<LibraryPage> {
 
 class _FocusSearchIntent extends Intent {
   const _FocusSearchIntent();
+}
+
+class _ClearSearchIntent extends Intent {
+  const _ClearSearchIntent();
 }
 
 class _Content extends StatelessWidget {
@@ -284,6 +310,8 @@ class _Header extends StatelessWidget {
     final origin = box.localToGlobal(Offset.zero, ancestor: overlay);
     final action = await showMenu<String>(
       context: context,
+      popUpAnimationStyle:
+          controller.config.reduceMotion ? AnimationStyle.noAnimation : null,
       color: MupTheme.of(context).surfaceBottom,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       position: RelativeRect.fromLTRB(
@@ -313,8 +341,11 @@ class _ListHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = MupTheme.of(context);
-    final count = controller.activeNav == 'search'
-        ? controller.songs.length
+    final isSearch = controller.activeNav == 'search';
+    final count = isSearch
+        ? controller.songs.length +
+            controller.albums.length +
+            controller.artists.length
         : controller.albums.isNotEmpty
             ? controller.albums.length
             : controller.artists.length;
@@ -324,8 +355,8 @@ class _ListHeader extends StatelessWidget {
       child: Row(
         children: [
           Text(
-            controller.activeNav == 'search' && controller.songs.isNotEmpty
-                ? '歌名 / 歌手'
+            isSearch
+                ? '搜索结果'
                 : controller.albums.isNotEmpty
                     ? '专辑'
                     : controller.artists.isNotEmpty
@@ -334,7 +365,9 @@ class _ListHeader extends StatelessWidget {
             style: TextStyle(color: theme.dim, fontSize: 11),
           ),
           const Spacer(),
-          if (controller.albums.isEmpty && controller.artists.isEmpty) ...[
+          if (!isSearch &&
+              controller.albums.isEmpty &&
+              controller.artists.isEmpty) ...[
             const SizedBox(width: 180),
             const SizedBox(width: 64),
           ] else
@@ -361,7 +394,10 @@ class _Body extends StatelessWidget {
         ),
       );
     }
-    if (controller.contentError != null && controller.songs.isEmpty) {
+    final hasResults = controller.songs.isNotEmpty ||
+        controller.albums.isNotEmpty ||
+        controller.artists.isNotEmpty;
+    if (controller.contentError != null && !hasResults) {
       return Center(
         child: Text(
           controller.contentError!,
@@ -370,8 +406,24 @@ class _Body extends StatelessWidget {
         ),
       );
     }
-    if (controller.activeNav == 'search' && controller.songs.isNotEmpty) {
-      return _songList(controller);
+    if (controller.activeNav == 'search') {
+      if (!hasResults) return const _SearchEmpty();
+      return _SearchResults(controller: controller);
+    }
+    if (controller.songs.isEmpty &&
+        controller.albums.isEmpty &&
+        controller.artists.isEmpty) {
+      final message = switch (controller.activeNav) {
+        'starred' => '暂无收藏歌曲',
+        'recent' => '暂无最近播放记录',
+        _ => '这里还没有内容',
+      };
+      return Center(
+        child: Text(
+          message,
+          style: TextStyle(color: MupTheme.of(context).muted, fontSize: 12),
+        ),
+      );
     }
     if (controller.albums.isNotEmpty) {
       return _AlbumGrid(controller: controller);
@@ -395,6 +447,139 @@ class _Body extends StatelessWidget {
       ),
     );
   }
+}
+
+class _SearchResults extends StatelessWidget {
+  const _SearchResults({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 8),
+      children: [
+        if (controller.songs.isNotEmpty) ...[
+          const _ResultSectionTitle(label: '歌曲'),
+          for (final song in controller.songs)
+            _SongRow(controller: controller, song: song),
+        ],
+        if (controller.albums.isNotEmpty) ...[
+          const _ResultSectionTitle(label: '专辑'),
+          SizedBox(
+            height: 186,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.only(bottom: 8),
+              itemCount: controller.albums.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (context, index) => _SearchAlbumTile(
+                controller: controller,
+                album: controller.albums[index],
+              ),
+            ),
+          ),
+        ],
+        if (controller.artists.isNotEmpty) ...[
+          const _ResultSectionTitle(label: '歌手'),
+          SizedBox(
+            height: 92,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.only(bottom: 8),
+              itemCount: controller.artists.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              itemBuilder: (context, index) => SizedBox(
+                width: 320,
+                child: _ArtistTile(
+                  controller: controller,
+                  artist: controller.artists[index],
+                  rank: index + 1,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _ResultSectionTitle extends StatelessWidget {
+  const _ResultSectionTitle({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(8, 14, 8, 8),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: MupTheme.of(context).muted,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.4,
+          ),
+        ),
+      );
+}
+
+class _SearchAlbumTile extends StatelessWidget {
+  const _SearchAlbumTile({required this.controller, required this.album});
+
+  final AppController controller;
+  final Album album;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = MupTheme.of(context);
+    return SizedBox(
+      width: 132,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: () => controller.openAlbumEntry(album),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CoverArt(
+                url: controller.coverUrlFor(album.coverId, size: 256),
+                size: 124,
+                radius: 15,
+                glow: true,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                album.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: theme.text, fontSize: 12.5),
+              ),
+              Text(
+                album.artist,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: theme.muted, fontSize: 10.5),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SearchEmpty extends StatelessWidget {
+  const _SearchEmpty();
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Text(
+          '没有找到相关歌曲、专辑或歌手',
+          style: TextStyle(color: MupTheme.of(context).muted, fontSize: 12),
+        ),
+      );
 }
 
 class _SongRow extends StatefulWidget {
@@ -426,7 +611,9 @@ class _SongRowState extends State<_SongRow> {
         behavior: HitTestBehavior.opaque,
         onTap: () => controller.playSong(song),
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 170),
+          duration: MediaQuery.of(context).disableAnimations
+              ? Duration.zero
+              : const Duration(milliseconds: 170),
           height: 64,
           padding: const EdgeInsets.symmetric(horizontal: 8),
           decoration: BoxDecoration(
@@ -458,7 +645,9 @@ class _SongRowState extends State<_SongRow> {
                   ),
                   AnimatedOpacity(
                     opacity: _hover ? 1 : 0,
-                    duration: const Duration(milliseconds: 150),
+                    duration: MediaQuery.of(context).disableAnimations
+                        ? Duration.zero
+                        : const Duration(milliseconds: 150),
                     child: Container(
                       width: 48,
                       height: 48,
@@ -603,7 +792,29 @@ class _EqBarsState extends State<_EqBars> with SingleTickerProviderStateMixin {
   late final AnimationController _controller = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 800),
-  )..repeat();
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncAnimation();
+  }
+
+  @override
+  void didUpdateWidget(covariant _EqBars oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncAnimation();
+  }
+
+  void _syncAnimation() {
+    final shouldRun =
+        widget.active && !MediaQuery.of(context).disableAnimations;
+    if (shouldRun && !_controller.isAnimating) {
+      _controller.repeat();
+    } else if (!shouldRun && _controller.isAnimating) {
+      _controller.stop();
+    }
+  }
 
   @override
   void dispose() {
@@ -758,7 +969,9 @@ class _ArtistTileState extends State<_ArtistTile> {
       child: GestureDetector(
         onTap: () => widget.controller.openArtistEntry(artist),
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
+          duration: MediaQuery.of(context).disableAnimations
+              ? Duration.zero
+              : const Duration(milliseconds: 180),
           padding: const EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
@@ -835,7 +1048,9 @@ class _MiniLyrics extends StatelessWidget {
       height: 26,
       alignment: Alignment.center,
       child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 280),
+        duration: MediaQuery.of(context).disableAnimations
+            ? Duration.zero
+            : const Duration(milliseconds: 280),
         child: Text(
           controller.miniLyric,
           key: ValueKey(controller.miniLyric),

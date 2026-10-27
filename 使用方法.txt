@@ -1,4 +1,4 @@
-音珏 - Mup Flutter 版 0.4.0 构建说明
+音珏 - Mup Flutter 版 0.4.1 构建说明
 
 一、环境要求
 
@@ -41,7 +41,7 @@ PowerShell:
 
 直接使用项目脚本：
 
-    .\tool\build-release.ps1 -Version 0.4.0 -BuildNumber 1
+    .\tool\build-release.ps1 -Version 0.4.1 -BuildNumber 1
 
 或手动构建：
 
@@ -55,12 +55,12 @@ PowerShell:
 
 发布脚本会生成：
 
-    release\Mup-Flutter-v0.4.0\
-    release\Mup-Flutter-v0.4.0-windows-x64.zip
+    release\Mup-Flutter-v0.4.1\
+    release\Mup-Flutter-v0.4.1-windows-x64.zip
 
 主程序：
 
-    release\Mup-Flutter-v0.4.0\Mup-v0.4.0.exe
+    release\Mup-Flutter-v0.4.1\Mup-v0.4.1.exe
 
 注意：Flutter Windows 使用目录式发布包，不能只复制 exe。
 必须同时分发同目录下的：
@@ -84,5 +84,5 @@ PowerShell:
 十、版本信息
 
 - 项目：音珏 - Mup
-- Flutter UI 重写版本：0.4.0
+- 当前版本：0.4.1
 - 构建号：1

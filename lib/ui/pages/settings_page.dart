@@ -86,6 +86,9 @@ class SettingsPage extends StatelessWidget {
                       if (!success && context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(content: Text('无法修改启动项，请检查系统权限')),
+                          snackBarAnimationStyle: controller.config.reduceMotion
+                              ? AnimationStyle.noAnimation
+                              : null,
                         );
                       }
                     },
@@ -207,7 +210,9 @@ class _ThemeSegment extends StatelessWidget {
             GestureDetector(
               onTap: () => onChanged(key),
               child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
+                duration: MediaQuery.of(context).disableAnimations
+                    ? Duration.zero
+                    : const Duration(milliseconds: 180),
                 padding: const EdgeInsets.symmetric(horizontal: 10),
                 alignment: Alignment.center,
                 decoration: BoxDecoration(

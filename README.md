@@ -4,7 +4,7 @@
 当前版本使用 Flutter 原生桌面界面，通过 **音桥（Yinqiao）** 将飞牛音乐服务
 转换为 Subsonic 协议后接入，不直接调用飞牛官方 API。
 
-当前版本：**v0.4.0 Flutter**
+当前版本：**v0.4.1 Flutter**
 
 本项目是公开的开源与提示词记录项目。旧版 PySide6/Qt 界面保留在
 [`v0.3.13`](https://github.com/AndyXFuture/Mup/tree/v0.3.13) 标签中；
@@ -48,11 +48,11 @@
 
 ## 下载
 
-从 GitHub Releases 下载 v0.4.0：
+从 GitHub Releases 下载 v0.4.1：
 
-`Mup-Flutter-v0.4.0-windows-x64.zip`
+`Mup-Flutter-v0.4.1-windows-x64.zip`
 
-完整解压后运行 `Mup-v0.4.0.exe`。
+完整解压后运行 `Mup-v0.4.1.exe`。
 
 > Flutter Windows 使用目录式发布包，不能只复制 exe。`data/`、
 > `flutter_windows.dll` 和同目录插件 DLL 都是运行必需文件。
@@ -72,8 +72,7 @@
 | 播放 / 暂停 | `Ctrl+Alt+P` | 播放/暂停键 |
 | 下一曲 | `Ctrl+Alt+→` | 下一曲键 |
 | 上一曲 | `Ctrl+Alt+←` | 上一曲键 |
-| 音量 + | 系统音量键 | 音量+键 |
-| 音量 - | 系统音量键 | 音量-键 |
+| 应用音量 | 播放栏音量滑块 | 不拦截，系统音量键交给 Windows |
 
 ## 开发
 
@@ -96,7 +95,7 @@ flutter run -d windows
 构建 Release：
 
 ```powershell
-.\tool\build-release.ps1 -Version 0.4.0 -BuildNumber 1
+.\tool\build-release.ps1 -Version 0.4.1 -BuildNumber 1
 ```
 
 产物位于 `release/`。完整构建说明见

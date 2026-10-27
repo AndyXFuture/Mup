@@ -99,7 +99,7 @@ class _SidebarState extends State<Sidebar> {
                     size: 22,
                     iconSize: 12,
                     tooltip: '刷新歌单',
-                    onTap: controller.refreshCurrent,
+                    onTap: controller.refreshPlaylists,
                   ),
                 ],
               ),
@@ -155,7 +155,9 @@ class _SearchFieldState extends State<_SearchField> {
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
+        duration: MediaQuery.of(context).disableAnimations
+            ? Duration.zero
+            : const Duration(milliseconds: 180),
         height: 34,
         decoration: BoxDecoration(
           color: theme.track,
@@ -253,7 +255,9 @@ class _NavItemState extends State<_NavItem> {
         behavior: HitTestBehavior.opaque,
         onTap: widget.onTap,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
+          duration: MediaQuery.of(context).disableAnimations
+              ? Duration.zero
+              : const Duration(milliseconds: 180),
           height: 38,
           margin: const EdgeInsets.symmetric(vertical: 1),
           padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -343,7 +347,9 @@ class _PlaylistRowState extends State<_PlaylistRow> {
           await widget.controller.playAll();
         },
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
+          duration: MediaQuery.of(context).disableAnimations
+              ? Duration.zero
+              : const Duration(milliseconds: 180),
           height: 40,
           margin: const EdgeInsets.symmetric(vertical: 1),
           padding: const EdgeInsets.symmetric(horizontal: 8),

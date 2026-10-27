@@ -10,6 +10,7 @@ class Song {
     this.coverId = '',
     this.track = 0,
     this.year = 0,
+    this.starred = false,
   });
 
   final String id;
@@ -22,6 +23,7 @@ class Song {
   final String coverId;
   final int track;
   final int year;
+  final bool starred;
 
   String get subtitle => [artist, album].where((e) => e.isNotEmpty).join(' · ');
 
@@ -37,6 +39,7 @@ class Song {
       coverId: _text(node, 'coverArt', '@coverArt'),
       track: _integer(node, 'track', '@track'),
       year: _integer(node, 'year', '@year'),
+      starred: node['starred'] != null && node['starred'] != false,
     );
   }
 
@@ -51,6 +54,7 @@ class Song {
         'coverId': coverId,
         'track': track,
         'year': year,
+        'starred': starred,
       };
 
   factory Song.fromJson(Map<String, dynamic> json) => Song(
@@ -64,6 +68,21 @@ class Song {
         coverId: json['coverId']?.toString() ?? '',
         track: (json['track'] as num?)?.toInt() ?? 0,
         year: (json['year'] as num?)?.toInt() ?? 0,
+        starred: json['starred'] == true,
+      );
+
+  Song withStarred(bool value) => Song(
+        id: id,
+        title: title,
+        artist: artist,
+        artistId: artistId,
+        album: album,
+        albumId: albumId,
+        duration: duration,
+        coverId: coverId,
+        track: track,
+        year: year,
+        starred: value,
       );
 }
 
@@ -92,6 +111,22 @@ class Playlist {
         coverId: _text(node, 'coverArt', '@coverArt'),
         comment: _text(node, 'comment', '@comment'),
       );
+
+  Playlist withSongCount(int value) => Playlist(
+        id: id,
+        name: name,
+        songCount: value,
+        duration: duration,
+        coverId: coverId,
+        comment: comment,
+      );
+}
+
+class PlaylistSongsResult {
+  const PlaylistSongsResult({required this.songs, required this.totalCount});
+
+  final List<Song> songs;
+  final int totalCount;
 }
 
 class Album {

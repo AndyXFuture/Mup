@@ -1,10 +1,77 @@
 #include "flutter_window.h"
 
+#include <commctrl.h>
 #include <flutter/standard_method_codec.h>
 
 #include <optional>
+#include <windowsx.h>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "utils.h"
+
+namespace {
+
+// The Dart title bar is 44 logical pixels high. Keep the four window controls
+// in client space so their Flutter gestures still receive mouse input, while
+// the rest of the strip uses the native caption behavior. HTCAPTION gives
+// Windows responsibility for dragging and double-click maximize/restore,
+// avoiding Flutter gesture hit-test and recognizer races.
+constexpr int kTitleBarHeight = 44;
+constexpr int kWindowControlsWidth = 128;
+constexpr int kResizeBorderWidth = 4;
+constexpr UINT_PTR kFlutterChildSubclassId = 1;
+
+LRESULT TitleBarHitTest(HWND window, LPARAM lparam) {
+  POINT cursor = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+  if (!::ScreenToClient(window, &cursor)) {
+    return HTCLIENT;
+  }
+
+  RECT client{};
+  if (!::GetClientRect(window, &client)) {
+    return HTCLIENT;
+  }
+
+  const UINT dpi = ::GetDpiForWindow(window);
+  const int scale = dpi == 0 ? 96 : static_cast<int>(dpi);
+  const int title_bar_height = ::MulDiv(kTitleBarHeight, scale, 96);
+  const int controls_width = ::MulDiv(kWindowControlsWidth, scale, 96);
+  const int resize_border = ::MulDiv(kResizeBorderWidth, scale, 96);
+
+  if (cursor.y < 0 || cursor.y >= title_bar_height || cursor.x < 0 ||
+      cursor.x >= client.right) {
+    return HTCLIENT;
+  }
+  if (cursor.y < resize_border) {
+    if (cursor.x < resize_border) return HTTOPLEFT;
+    if (cursor.x >= client.right - resize_border) return HTTOPRIGHT;
+    return HTTOP;
+  }
+  if (cursor.x < client.right - controls_width) {
+    return HTCAPTION;
+  }
+  return HTCLIENT;
+}
+
+LRESULT CALLBACK FlutterChildWndProc(HWND window,
+                                     UINT message,
+                                     WPARAM wparam,
+                                     LPARAM lparam,
+                                     UINT_PTR subclass_id,
+                                     DWORD_PTR ref_data) {
+  // The Flutter view receives hit tests before its top-level parent. Pass the
+  // title strip through so Win32Window can classify it as HTCAPTION; otherwise
+  // Flutter owns the mouse and startDragging/double-tap recognizers compete.
+  if (message == WM_NCHITTEST) {
+    const HWND parent = ::GetParent(window);
+    if (parent != nullptr && TitleBarHitTest(parent, lparam) != HTCLIENT) {
+      return HTTRANSPARENT;
+    }
+  }
+  return ::DefSubclassProc(window, message, wparam, lparam);
+}
+
+}  // namespace
 
 FlutterWindow* FlutterWindow::active_instance_ = nullptr;
 
@@ -29,7 +96,10 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
-  SetChildContent(flutter_controller_->view()->GetNativeWindow());
+  const HWND flutter_view = flutter_controller_->view()->GetNativeWindow();
+  SetChildContent(flutter_view);
+  ::SetWindowSubclass(flutter_view, &FlutterChildWndProc,
+                      kFlutterChildSubclassId, 0);
 
   media_channel_ =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
@@ -47,6 +117,14 @@ bool FlutterWindow::OnCreate() {
           result->Success(flutter::EncodableValue(keyboard_hook_ != nullptr));
         } else if (call.method_name() == "stop") {
           StopMediaHook();
+          result->Success();
+        } else if (call.method_name() == "ready") {
+          HANDLE ready = ::OpenEventW(
+              EVENT_MODIFY_STATE, FALSE, L"Local\\YinjueMupFlutterReady");
+          if (ready != nullptr) {
+            ::SetEvent(ready);
+            ::CloseHandle(ready);
+          }
           result->Success();
         } else {
           result->NotImplemented();
@@ -67,6 +145,8 @@ void FlutterWindow::OnDestroy() {
     media_channel_ = nullptr;
   }
   if (flutter_controller_) {
+    ::RemoveWindowSubclass(flutter_controller_->view()->GetNativeWindow(),
+                           &FlutterChildWndProc, kFlutterChildSubclassId);
     flutter_controller_ = nullptr;
   }
 
@@ -80,9 +160,16 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   static const UINT show_message =
       ::RegisterWindowMessageW(L"YinjueMupFlutterShowWindow");
   if (message == show_message) {
-    Show();
-    ::SetForegroundWindow(GetHandle());
+    ShowAndFocusWindow(GetHandle());
     return 0;
+  }
+
+  // Resolve the title strip before Flutter/plugins consume the hit test. This
+  // makes every non-control part of the top bar behave like a real Windows
+  // caption, including dragging from maximized state and double-click.
+  if (message == WM_NCHITTEST) {
+    const LRESULT title_bar_hit = TitleBarHitTest(hwnd, lparam);
+    if (title_bar_hit != HTCLIENT) return title_bar_hit;
   }
 
   // Give Flutter, including plugins, an opportunity to handle window messages.
@@ -146,12 +233,6 @@ LRESULT CALLBACK FlutterWindow::KeyboardHookProc(int code, WPARAM wparam,
               break;
             case VK_MEDIA_PREV_TRACK:
               action = "previous";
-              break;
-            case VK_VOLUME_UP:
-              action = "volume_up";
-              break;
-            case VK_VOLUME_DOWN:
-              action = "volume_down";
               break;
             case 'P':
               if (ctrl && alt) action = "play_pause";

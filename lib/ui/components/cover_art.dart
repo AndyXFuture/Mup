@@ -37,7 +37,7 @@ class CoverArt extends StatelessWidget {
           ),
           border: Border.all(color: theme.rimSoft),
         ),
-        child: url.isEmpty ? _placeholder(theme) : _image(theme),
+        child: url.isEmpty ? _placeholder(theme) : _image(theme, context),
       ),
     );
     if (!glow) return base;
@@ -65,22 +65,30 @@ class CoverArt extends StatelessWidget {
         ),
       );
 
-  Widget _image(MupTheme theme) {
+  Widget _image(MupTheme theme, BuildContext context) {
+    final cacheSize =
+        (size * MediaQuery.devicePixelRatioOf(context)).round().clamp(1, 2048);
     if (url.startsWith('asset:')) {
       return Image.asset(
         url.substring('asset:'.length),
         width: size,
         height: size,
+        cacheWidth: cacheSize,
+        cacheHeight: cacheSize,
         fit: BoxFit.cover,
         errorBuilder: (_, __, ___) => _placeholder(theme),
       );
     }
-    if (File(url).existsSync()) {
+    final uri = Uri.tryParse(url);
+    final isNetwork = uri?.scheme == 'http' || uri?.scheme == 'https';
+    if (!isNetwork) {
       return Image.file(
         key: ValueKey('file:$url'),
         File(url),
         width: size,
         height: size,
+        cacheWidth: cacheSize,
+        cacheHeight: cacheSize,
         fit: BoxFit.cover,
         errorBuilder: (_, __, ___) => _placeholder(theme),
       );
@@ -90,6 +98,8 @@ class CoverArt extends StatelessWidget {
       url,
       width: size,
       height: size,
+      cacheWidth: cacheSize,
+      cacheHeight: cacheSize,
       fit: BoxFit.cover,
       errorBuilder: (_, __, ___) => _placeholder(theme),
       loadingBuilder: (context, child, progress) =>
